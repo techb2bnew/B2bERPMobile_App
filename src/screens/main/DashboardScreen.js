@@ -92,7 +92,7 @@ const DashboardScreen = () => {
 
         <TouchableOpacity
           style={styles.sectionCard}
-          onPress={() => navigation.navigate(MAIN_ROUTES.MY_TASKS)}
+          onPress={() => navigation.navigate(MAIN_ROUTES.PROJECTS_WORK)}
           activeOpacity={0.85}>
           <Text style={styles.sectionTitle}>{MY_TASKS_TITLE} →</Text>
           <View style={styles.emptyWrap}>

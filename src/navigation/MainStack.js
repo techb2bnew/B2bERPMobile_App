@@ -7,7 +7,8 @@ import { darkBackgroundColor } from '../constants/Color';
 import DashboardScreen from '../screens/main/DashboardScreen';
 import ChannelChatScreen from '../screens/main/ChannelChatScreen';
 import ChatScreen from '../screens/main/ChatScreen';
-import MyTasksScreen from '../screens/main/MyTasksScreen';
+import ProjectsWorkScreen from '../screens/main/ProjectsWorkScreen';
+import TaskManagementScreen from '../screens/main/TaskManagementScreen';
 import NotificationsScreen from '../screens/main/NotificationsScreen';
 import TimeSheetScreen from '../screens/main/TimeSheetScreen';
 import { MAIN_ROUTES } from './routes';
@@ -41,9 +42,14 @@ const MainStackNavigator = () => {
           listeners={focusListener(MAIN_ROUTES.NOTIFICATIONS, setActiveRoute)}
         />
         <Stack.Screen
-          name={MAIN_ROUTES.MY_TASKS}
-          component={MyTasksScreen}
-          listeners={focusListener(MAIN_ROUTES.MY_TASKS, setActiveRoute)}
+          name={MAIN_ROUTES.PROJECTS_WORK}
+          component={ProjectsWorkScreen}
+          listeners={focusListener(MAIN_ROUTES.PROJECTS_WORK, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.TASK_MANAGEMENT}
+          component={TaskManagementScreen}
+          listeners={focusListener(MAIN_ROUTES.PROJECTS_WORK, setActiveRoute)}
         />
         <Stack.Screen
           name={MAIN_ROUTES.TIME_SHEET}

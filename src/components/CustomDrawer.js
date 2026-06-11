@@ -26,7 +26,7 @@ import {
   LOGOUT_CONFIRM_TITLE,
   LOGOUT_TEXT,
   MY_DASHBOARD_LABEL,
-  MY_TASKS_LABEL,
+  PROJECTS_WORK_LABEL,
   ONLINE_STATUS,
   TIME_SHEET_LABEL,
 } from '../constants/Constants';
@@ -53,7 +53,7 @@ const getDrawerWidth = () => Dimensions.get('window').width * 0.75;
 
 const MENU_ITEMS = [
   { route: MAIN_ROUTES.DASHBOARD, label: MY_DASHBOARD_LABEL, icon: 'grid' },
-  { route: MAIN_ROUTES.MY_TASKS, label: MY_TASKS_LABEL, icon: 'check-square' },
+  { route: MAIN_ROUTES.PROJECTS_WORK, label: PROJECTS_WORK_LABEL, icon: 'folder' },
   { route: MAIN_ROUTES.TIME_SHEET, label: TIME_SHEET_LABEL, icon: 'clock' },
   { route: MAIN_ROUTES.CHAT, label: CHAT_LABEL, icon: 'message-circle', badge: 2 },
 ];
