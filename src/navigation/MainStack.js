@@ -1,0 +1,83 @@
+import React from 'react';
+import { StyleSheet, View } from 'react-native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import CustomDrawer from '../components/CustomDrawer';
+import { DrawerProvider, useDrawer } from '../context/DrawerContext';
+import { darkBackgroundColor } from '../constants/Color';
+import DashboardScreen from '../screens/main/DashboardScreen';
+import ChannelChatScreen from '../screens/main/ChannelChatScreen';
+import ChatScreen from '../screens/main/ChatScreen';
+import MyTasksScreen from '../screens/main/MyTasksScreen';
+import NotificationsScreen from '../screens/main/NotificationsScreen';
+import TimeSheetScreen from '../screens/main/TimeSheetScreen';
+import { MAIN_ROUTES } from './routes';
+
+const Stack = createNativeStackNavigator();
+
+const focusListener = (routeName, setActiveRoute) => ({
+  focus: () => setActiveRoute(routeName),
+});
+
+const MainStackNavigator = () => {
+  const { setActiveRoute } = useDrawer();
+
+  return (
+    <View style={styles.root}>
+      <Stack.Navigator
+        initialRouteName={MAIN_ROUTES.DASHBOARD}
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: darkBackgroundColor },
+          animation: 'slide_from_right',
+        }}>
+        <Stack.Screen
+          name={MAIN_ROUTES.DASHBOARD}
+          component={DashboardScreen}
+          listeners={focusListener(MAIN_ROUTES.DASHBOARD, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.NOTIFICATIONS}
+          component={NotificationsScreen}
+          listeners={focusListener(MAIN_ROUTES.NOTIFICATIONS, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.MY_TASKS}
+          component={MyTasksScreen}
+          listeners={focusListener(MAIN_ROUTES.MY_TASKS, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.TIME_SHEET}
+          component={TimeSheetScreen}
+          listeners={focusListener(MAIN_ROUTES.TIME_SHEET, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.CHAT}
+          component={ChatScreen}
+          listeners={focusListener(MAIN_ROUTES.CHAT, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.CHANNEL_CHAT}
+          component={ChannelChatScreen}
+          listeners={focusListener(MAIN_ROUTES.CHAT, setActiveRoute)}
+        />
+      </Stack.Navigator>
+      <CustomDrawer />
+    </View>
+  );
+};
+
+const MainStack = () => {
+  return (
+    <DrawerProvider>
+      <MainStackNavigator />
+    </DrawerProvider>
+  );
+};
+
+export default MainStack;
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+});
