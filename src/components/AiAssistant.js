@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
+import { useNavigation } from '@react-navigation/native';
 import AiAssistantFab from './AiAssistantFab';
 // import AiAssistantModal from './Modal/AiAssistantModal';
 import CallEmployeeModal from './Modal/CallEmployeeModal';
 import QuickActionMenu from './QuickActionMenu';
+import { MAIN_ROUTES } from '../navigation/routes';
 
 const AiAssistant = ({ badgeCount = 4 }) => {
+  const navigation = useNavigation();
   const [menuVisible, setMenuVisible] = useState(false);
   const [callModalVisible, setCallModalVisible] = useState(false);
   // const [chatVisible, setChatVisible] = useState(false);
@@ -20,6 +23,7 @@ const AiAssistant = ({ badgeCount = 4 }) => {
 
   const handleBroadcastMessage = () => {
     setMenuVisible(false);
+    navigation.navigate(MAIN_ROUTES.CHAT);
   };
 
   return (

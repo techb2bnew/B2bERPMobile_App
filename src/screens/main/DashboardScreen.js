@@ -70,8 +70,6 @@ const PURPLE = '#9B59B6';
 const CARD_RADIUS = wp(4);
 const HORIZONTAL_PAD = wp(5);
 const CARD_GAP = hp(2);
-const LIVE_POLL_INTERVAL_MS = 5000;
-
 const DashboardScreen = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
@@ -125,11 +123,8 @@ const DashboardScreen = () => {
       loadTodayTasks();
       syncSupabaseRealtimeAuth().catch(() => {});
 
-      const pollTimer = setInterval(refresh, LIVE_POLL_INTERVAL_MS);
-
       return () => {
         active = false;
-        clearInterval(pollTimer);
       };
     }, [loadTodayTasks]),
   );
@@ -217,7 +212,7 @@ const DashboardScreen = () => {
             {DASHBOARD_LIVE_SUFFIX}
           </Text>
 
-          <View style={styles.clockCard}>
+          {/* <View style={styles.clockCard}>
             <View style={styles.clockLeft}>
               <Text style={styles.timer}>{formattedTime}</Text>
               <Text style={styles.clockStatus}>
@@ -249,7 +244,7 @@ const DashboardScreen = () => {
                 </Text>
               )}
             </TouchableOpacity>
-          </View>
+          </View> */}
 
           {isCheckingLocation ? (
             <Text style={styles.locationHint}>{CHECKING_LOCATION_TEXT}</Text>

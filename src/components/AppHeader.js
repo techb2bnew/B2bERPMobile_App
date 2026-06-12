@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { useDrawer } from '../context/DrawerContext';
 import {
@@ -10,14 +9,12 @@ import {
   darkTextPrimaryColor,
 } from '../constants/Color';
 import { style, spacings } from '../constants/Fonts';
-import { MAIN_ROUTES } from '../navigation/routes';
 import { widthPercentageToDP as wp, heightPercentageToDP as hp } from '../utils';
 import ProfileMenu from './Modal/ProfileMenu';
 
 const PURPLE = '#9B59B6';
 
-const AppHeader = ({ title }) => {
-  const navigation = useNavigation();
+const AppHeader = ({ title, actionIcon, onActionPress, actionAccessibilityLabel }) => {
   const { user } = useAuth();
   const { openDrawer } = useDrawer();
   const [profileMenuVisible, setProfileMenuVisible] = useState(false);
@@ -27,11 +24,13 @@ const AppHeader = ({ title }) => {
   return (
     <View style={styles.container}>
       <TouchableOpacity
-        style={styles.iconButton}
+        style={styles.menuButton}
         onPress={openDrawer}
         activeOpacity={0.7}
-        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-        <Text style={styles.hashIcon}>#</Text>
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityRole="button"
+        accessibilityLabel="Open menu">
+        <Icon name="menu" size={wp(5.5)} color={darkTextPrimaryColor} />
       </TouchableOpacity>
 
       <Text style={styles.title} numberOfLines={1}>
@@ -39,6 +38,18 @@ const AppHeader = ({ title }) => {
       </Text>
 
       <View style={styles.rightActions}>
+        {actionIcon && onActionPress ? (
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={onActionPress}
+            activeOpacity={0.75}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={actionAccessibilityLabel || 'Action'}>
+            <Icon name={actionIcon} size={wp(5)} color={darkTextPrimaryColor} />
+          </TouchableOpacity>
+        ) : null}
+
         {/* <TouchableOpacity
           style={styles.iconButton}
           onPress={() => navigation.navigate(MAIN_ROUTES.NOTIFICATIONS)}
@@ -76,14 +87,29 @@ const styles = StyleSheet.create({
     borderBottomColor: darkBorderColor,
     backgroundColor: darkBackgroundColor,
   },
+  menuButton: {
+    width: wp(9),
+    height: wp(9),
+    borderRadius: wp(4.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    backgroundColor: 'rgba(155, 89, 182, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   iconButton: {
     padding: spacings.xsmall,
     position: 'relative',
   },
-  hashIcon: {
-    ...style.fontSizeLarge,
-    ...style.fontWeightMedium1x,
-    color: darkTextPrimaryColor,
+  actionButton: {
+    width: wp(9),
+    height: wp(9),
+    borderRadius: wp(4.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    backgroundColor: 'rgba(155, 89, 182, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     flex: 1,

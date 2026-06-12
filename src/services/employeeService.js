@@ -103,6 +103,24 @@ export const fetchAllEmployeeProfiles = async () => {
   return data || [];
 };
 
+export const getEmployeeProfileById = async id => {
+  if (!isSupabaseConfigured || !id) {
+    return null;
+  }
+
+  const { data, error } = await getSupabase()
+    .from(EMPLOYEE_PROFILES_TABLE)
+    .select('id, name, email, phone')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
 export const getEmployeeProfileByEmail = async email => {
   if (!isSupabaseConfigured) {
     throw new Error('Supabase is not configured');

@@ -35,7 +35,7 @@ import {
 import { style } from '../../constants/Fonts';
 import { useAuth } from '../../context/AuthContext';
 import { fetchAllEmployeeProfiles } from '../../services/employeeService';
-import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
+import { capitalizeName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const isCurrentUser = (employee, user) => {
   if (!user) {
@@ -105,7 +105,9 @@ const CallEmployeeModal = ({ visible, onClose }) => {
     [employees, selectedEmployeeId],
   );
 
-  const selectedLabel = selectedEmployee?.name || CALL_EMPLOYEE_SELECT_PLACEHOLDER;
+  const selectedLabel = selectedEmployee
+    ? capitalizeName(selectedEmployee.name)
+    : CALL_EMPLOYEE_SELECT_PLACEHOLDER;
   const phoneNumber = selectedEmployee?.phone?.trim() || '';
 
   const openDropdown = () => {
@@ -232,7 +234,7 @@ const CallEmployeeModal = ({ visible, onClose }) => {
                   <Text
                     style={[styles.dropdownText, isActive && styles.dropdownTextActive]}
                     numberOfLines={1}>
-                    {employee.name}
+                    {capitalizeName(employee.name)}
                   </Text>
                 </TouchableOpacity>
               );

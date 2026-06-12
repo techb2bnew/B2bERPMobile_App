@@ -55,7 +55,7 @@ const MENU_ITEMS = [
   { route: MAIN_ROUTES.DASHBOARD, label: MY_DASHBOARD_LABEL, icon: 'grid' },
   { route: MAIN_ROUTES.PROJECTS_WORK, label: PROJECTS_WORK_LABEL, icon: 'folder' },
   { route: MAIN_ROUTES.TIME_SHEET, label: TIME_SHEET_LABEL, icon: 'clock' },
-  { route: MAIN_ROUTES.CHAT, label: CHAT_LABEL, icon: 'message-circle', badge: 2 },
+  { route: MAIN_ROUTES.CHAT, label: CHAT_LABEL, icon: 'message-circle' },
 ];
 
 const CustomDrawer = () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +11,7 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
+import { Calendar } from 'react-native-calendars';
 import Icon from 'react-native-vector-icons/Feather';
 import DropdownSelect from '../DropdownSelect';
 import {
@@ -25,6 +26,7 @@ import {
   TASK_NEW_TASK_TITLE,
   TASK_PRIORITY_LABEL,
   TASK_SAVE_TASK_BUTTON,
+  TASK_SELECT_DUE_DATE,
   TASK_STATUS_LABEL,
   TASK_STATUS_READY_FOR_TESTING,
   TASK_TITLE_LABEL,
@@ -42,7 +44,8 @@ import {
   darkTextSecondaryColor,
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
-import { getTodayDueDateLabel } from '../../utils/projectUtils';
+import { getLocalDateKey } from '../../services/clockSessionsService';
+import { formatTaskDate, parseDueDateToKey } from '../../utils/projectUtils';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const PURPLE = '#9B59B6';
@@ -74,9 +77,42 @@ const TaskDetailModal = ({
   const [status, setStatus] = useState(TASK_FILTER_TODO);
   const [priority, setPriority] = useState('medium');
   const [assignee, setAssignee] = useState('');
-  const [dueDate, setDueDate] = useState('');
+  const [dueDateKey, setDueDateKey] = useState('');
+  const [calendarVisible, setCalendarVisible] = useState(false);
   const [estimatedHours, setEstimatedHours] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const dueDateLabel = useMemo(
+    () => (dueDateKey ? formatTaskDate(dueDateKey) : ''),
+    [dueDateKey],
+  );
+
+  const calendarMarkedDates = useMemo(() => {
+    if (!dueDateKey) {
+      return {};
+    }
+
+    return {
+      [dueDateKey]: {
+        selected: true,
+        selectedColor: PURPLE,
+        selectedTextColor: '#ffffff',
+      },
+    };
+  }, [dueDateKey]);
+
+  const calendarTheme = {
+    backgroundColor: darkSurfaceColor,
+    calendarBackground: darkSurfaceColor,
+    textSectionTitleColor: darkTextSecondaryColor,
+    selectedDayBackgroundColor: PURPLE,
+    selectedDayTextColor: '#ffffff',
+    todayTextColor: PURPLE,
+    dayTextColor: darkTextPrimaryColor,
+    textDisabledColor: 'rgba(255,255,255,0.25)',
+    monthTextColor: darkTextPrimaryColor,
+    arrowColor: PURPLE,
+  };
 
   useEffect(() => {
     if (!visible) {
@@ -88,7 +124,7 @@ const TaskDetailModal = ({
       setStatus(defaultStatus || TASK_FILTER_TODO);
       setPriority('medium');
       setAssignee(task?.assignee || '');
-      setDueDate(getTodayDueDateLabel());
+      setDueDateKey(getLocalDateKey());
       setEstimatedHours('');
       return;
     }
@@ -100,7 +136,7 @@ const TaskDetailModal = ({
     setStatus(task.status || TASK_FILTER_TODO);
     setPriority(task.priority || 'medium');
     setAssignee(task.assignee || '');
-    setDueDate(task.dueDate || '');
+    setDueDateKey(parseDueDateToKey(task.dueDate) || getLocalDateKey());
     setEstimatedHours(task.estimatedHours || '');
   }, [visible, task, isCreate, defaultStatus]);
 
@@ -123,7 +159,7 @@ const TaskDetailModal = ({
       priority,
       assignee: assignee.trim(),
       assigneeId: task?.assigneeId || '',
-      dueDate: dueDate.trim(),
+      dueDate: dueDateKey,
       estimatedHours: estimatedHours.trim(),
       hoursWorked: estimatedHours.trim()
         ? `${estimatedHours.trim()}h worked`
@@ -133,7 +169,7 @@ const TaskDetailModal = ({
     console.log('[TaskModal] save clicked', {
       mode: isCreate ? 'create' : 'edit',
       payload,
-      formFields: { title, description, status, priority, assignee, dueDate, estimatedHours },
+      formFields: { title, description, status, priority, assignee, dueDateKey, estimatedHours },
     });
 
     setSaving(true);
@@ -199,18 +235,22 @@ const TaskDetailModal = ({
                   />
                   <View style={styles.halfField}>
                     <Text style={styles.label}>{TASK_DUE_DATE_LABEL}</Text>
-                    <View style={styles.dateWrap}>
-                      <TextInput
-                        style={[styles.input, styles.dateInput]}
-                        value={dueDate}
-                        onChangeText={setDueDate}
-                        placeholder="DD/MM/YYYY"
-                        placeholderTextColor={darkPlaceholderColor}
-                      />
-                      <View style={styles.calendarIcon}>
-                        <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => setCalendarVisible(true)}>
+                      <View style={styles.dateWrap} pointerEvents="none">
+                        <TextInput
+                          style={[styles.input, styles.dateInput]}
+                          value={dueDateLabel}
+                          editable={false}
+                          placeholder="Select date"
+                          placeholderTextColor={darkPlaceholderColor}
+                        />
+                        <View style={styles.calendarIcon}>
+                          <Icon name="calendar" size={wp(4.5)} color={PURPLE} />
+                        </View>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -257,6 +297,39 @@ const TaskDetailModal = ({
           </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
+      <Modal
+        visible={calendarVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCalendarVisible(false)}>
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.calendarOverlay}
+          onPress={() => setCalendarVisible(false)}>
+          <TouchableOpacity activeOpacity={1} style={styles.calendarCard} onPress={() => {}}>
+            <View style={styles.calendarHeader}>
+              <Text style={styles.calendarTitle}>{TASK_SELECT_DUE_DATE}</Text>
+              <TouchableOpacity
+                onPress={() => setCalendarVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Icon name="x" size={wp(5)} color={darkTextSecondaryColor} />
+              </TouchableOpacity>
+            </View>
+
+            <Calendar
+              current={dueDateKey || getLocalDateKey()}
+              markedDates={calendarMarkedDates}
+              onDayPress={day => {
+                setDueDateKey(day.dateString);
+                setCalendarVisible(false);
+              }}
+              enableSwipeMonths
+              theme={calendarTheme}
+              style={styles.calendar}
+            />
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </Modal>
   );
 };
@@ -364,5 +437,37 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: {
     opacity: 0.7,
+  },
+  calendarOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: wp(5),
+  },
+  calendarCard: {
+    width: '100%',
+    backgroundColor: darkSurfaceColor,
+    borderRadius: wp(4),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    paddingHorizontal: wp(4),
+    paddingTop: hp(1.8),
+    paddingBottom: hp(2),
+  },
+  calendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: hp(1),
+  },
+  calendarTitle: {
+    ...style.fontSizeNormal2x,
+    ...style.fontWeightMedium1x,
+    color: darkTextPrimaryColor,
+  },
+  calendar: {
+    borderRadius: wp(3),
+    overflow: 'hidden',
   },
 });

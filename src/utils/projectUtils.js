@@ -127,6 +127,48 @@ export const getTodayDueDateLabel = () => {
   return today.toLocaleString('en-US', { month: 'short', day: 'numeric' });
 };
 
+export const parseDueDateToKey = value => {
+  if (!value) {
+    return '';
+  }
+
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed.slice(0, 10);
+  }
+
+  const parsedMs = Date.parse(trimmed);
+  if (!Number.isNaN(parsedMs)) {
+    const date = new Date(parsedMs);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  const parts = trimmed.split(/\s+/);
+  const month = MONTH_MAP[parts[0]];
+  const day = Number.parseInt(parts[1], 10);
+  const year = parts[2] ? Number.parseInt(parts[2], 10) : new Date().getFullYear();
+
+  if (month != null && !Number.isNaN(day)) {
+    const date = new Date(year, month, day);
+    const isoMonth = String(date.getMonth() + 1).padStart(2, '0');
+    const isoDay = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${isoMonth}-${isoDay}`;
+  }
+
+  return '';
+};
+
 export const formatTaskDate = value => {
   if (!value) {
     return '';

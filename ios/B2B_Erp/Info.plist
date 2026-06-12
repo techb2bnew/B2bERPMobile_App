@@ -56,6 +56,10 @@
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used to verify you are at the office before starting your attendance timer.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photos and videos are used to share media in chat.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera is used to take photos for chat messages.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

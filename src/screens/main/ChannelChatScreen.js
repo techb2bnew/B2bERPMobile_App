@@ -1,6 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  InteractionManager,
   KeyboardAvoidingView,
+  Linking,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -12,11 +17,27 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
+import { launchImageLibrary } from 'react-native-image-picker';
+import { pick, types } from '@react-native-documents/picker';
 import {
   CHAT_BROADCAST_LABEL,
+  CHAT_EMPTY_THREAD,
+  CHAT_LOAD_ERROR,
+  CHAT_MEDIA_UPLOAD_ERROR,
   CHAT_MEMBERS_SUFFIX,
+  CHAT_MESSAGE_PLACEHOLDER_DIRECT,
   CHAT_MESSAGE_PLACEHOLDER_PREFIX,
+  CHAT_SEARCH_NO_RESULTS,
+  CHAT_SEARCH_PLACEHOLDER,
+  CHAT_SEARCH_RESULTS_SUFFIX,
+  CHAT_SEND_ERROR,
+  CHAT_UPLOADING_MEDIA,
+  CALL_EMPLOYEE_CALL_BUTTON,
+  CALL_EMPLOYEE_DIALER_ERROR,
+  CALL_EMPLOYEE_NO_PHONE,
 } from '../../constants/Constants';
+import ChatMessageContent from '../../components/ChatMessageContent';
+import ChatAttachModal from '../../components/Modal/ChatAttachModal';
 import {
   darkBackgroundColor,
   darkBorderColor,
@@ -27,172 +48,474 @@ import {
   darkTextSecondaryColor,
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
-import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
+import { useAuth } from '../../context/AuthContext';
+import { isSupabaseConfigured } from '../../lib/supabase';
+import {
+  fetchChannelMessages,
+  markChannelAsRead,
+  resolveChannelForChatParams,
+  sendChannelMessage,
+  subscribeToChannelMessages,
+} from '../../services/chatService';
+import { getEmployeeProfileById } from '../../services/employeeService';
+import { uploadChatMedia } from '../../services/chatMediaService';
+import { capitalizeName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const PURPLE = '#9B59B6';
-const HORIZONTAL_PAD = wp(4);
+const OWN_BUBBLE = '#6C3A8C';
+const OTHER_BUBBLE = '#1E2A3A';
+const CHAT_BG = '#0F1419';
+const HORIZONTAL_PAD = wp(3.5);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const AVATAR_COLORS = ['#2D7DD2', '#9B59B6', '#E84393', '#3DDC84', '#F5A623'];
+const isUuid = value => UUID_PATTERN.test(String(value || ''));
 
-const CHANNEL_MESSAGES = {
-  general: [
-    {
-      id: '1',
-      name: 'Arjun Mehta',
-      initial: 'AM',
-      color: AVATAR_COLORS[0],
-      time: '10:42 AM',
-      text: 'CRM API integration is 80% done. Should be ready for review by EOD.',
-    },
-    {
-      id: '2',
-      name: 'Priya Sharma',
-      initial: 'PS',
-      color: AVATAR_COLORS[1],
-      time: '10:38 AM',
-      text: 'Sharing updated ClientHub v2 designs now — check the Figma link in #design.',
-    },
-    {
-      id: '3',
-      name: 'CEO Admin',
-      initial: 'B2',
-      color: AVATAR_COLORS[2],
-      time: '10:15 AM',
-      text: '🚨 Broadcast: All team leads — weekly sync moved to 4 PM today.',
-      isBroadcast: true,
-    },
-    {
-      id: '4',
-      name: 'Kavya Nair',
-      initial: 'KN',
-      color: AVATAR_COLORS[3],
-      time: '9:55 AM',
-      text: 'Innovate Digital deal signed! ₹8.2L closed. 🎉 Celebrating small wins.',
-    },
-    {
-      id: '5',
-      name: 'Rahul Gupta',
-      initial: 'RG',
-      color: AVATAR_COLORS[4],
-      time: '9:30 AM',
-      text: 'Q2 LinkedIn campaign is live — early CTR looks strong at 4.8%.',
-    },
-  ],
-  'dev-team': [
-    {
-      id: '1',
-      name: 'Amit Kumar',
-      initial: 'AK',
-      color: AVATAR_COLORS[0],
-      time: '11:05 AM',
-      text: 'Pushed the login fix to staging — please test on Android.',
-    },
-    {
-      id: '2',
-      name: 'Sneha Patel',
-      initial: 'SP',
-      color: AVATAR_COLORS[1],
-      time: '10:50 AM',
-      text: 'Supabase RLS policies updated for employee module.',
-    },
-    {
-      id: '3',
-      name: 'Rahul Gupta',
-      initial: 'RG',
-      color: AVATAR_COLORS[4],
-      time: '10:20 AM',
-      text: 'Code review needed on PR #142 — API integration branch.',
-    },
-  ],
-  design: [
-    {
-      id: '1',
-      name: 'Priya Sharma',
-      initial: 'PS',
-      color: AVATAR_COLORS[1],
-      time: '2:15 PM',
-      text: 'ClientHub v2 Figma link updated — feedback welcome by EOD.',
-    },
-    {
-      id: '2',
-      name: 'Neha Singh',
-      initial: 'NS',
-      color: AVATAR_COLORS[2],
-      time: '1:40 PM',
-      text: 'Dashboard card spacing aligned with design system tokens.',
-    },
-  ],
-  marketing: [
-    {
-      id: '1',
-      name: 'Rahul Gupta',
-      initial: 'RG',
-      color: AVATAR_COLORS[4],
-      time: '3:00 PM',
-      text: 'Q2 LinkedIn ads CTR at 4.8% — scaling budget next week.',
-    },
-    {
-      id: '2',
-      name: 'Kavya Nair',
-      initial: 'KN',
-      color: AVATAR_COLORS[3],
-      time: '11:30 AM',
-      text: 'Innovate Digital case study draft ready for review.',
-    },
-  ],
-  'hr-team': [
-    {
-      id: '1',
-      name: 'Meera Joshi',
-      initial: 'MJ',
-      color: AVATAR_COLORS[1],
-      time: '9:00 AM',
-      text: 'Leave policy for Q2 is now live on the portal.',
-    },
-    {
-      id: '2',
-      name: 'CEO Admin',
-      initial: 'B2',
-      color: AVATAR_COLORS[2],
-      time: '8:45 AM',
-      text: '🚨 Broadcast: All-hands meeting scheduled for Friday 3 PM.',
-      isBroadcast: true,
-    },
-  ],
-  announcements: [
-    {
-      id: '1',
-      name: 'CEO Admin',
-      initial: 'B2',
-      color: AVATAR_COLORS[2],
-      time: 'Today',
-      text: '🚨 Broadcast: Office will remain open on Saturday for sprint closure.',
-      isBroadcast: true,
-    },
-    {
-      id: '2',
-      name: 'HR Team',
-      initial: 'HR',
-      color: AVATAR_COLORS[0],
-      time: 'Yesterday',
-      text: 'Health insurance renewal forms due by end of month.',
-    },
-  ],
+const shouldShowAvatar = (list, index, currentUserId) => {
+  const item = list[index];
+  if (item.isBroadcast || item.senderId === currentUserId) {
+    return false;
+  }
+
+  const next = list[index + 1];
+  if (!next || next.isBroadcast) {
+    return true;
+  }
+
+  return next.senderId !== item.senderId;
+};
+
+const isClusterStart = (list, index) => {
+  const item = list[index];
+  const prev = list[index - 1];
+  if (!prev || prev.isBroadcast || item.isBroadcast) {
+    return true;
+  }
+
+  return prev.senderId !== item.senderId;
 };
 
 const ChannelChatScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const { channelId, channelName, members } = route.params || {};
+  const { user } = useAuth();
+  const scrollRef = useRef(null);
+  const pendingAttachRef = useRef(null);
+  const pickingMediaRef = useRef(false);
 
-  const [message, setMessage] = useState('');
+  const {
+    chatType = 'group',
+    chatId,
+    chatName,
+    channelId,
+    channelName,
+    members = 0,
+    peerId,
+    memberIds,
+  } = route.params || {};
 
-  const messages = useMemo(
-    () => CHANNEL_MESSAGES[channelId] || [],
-    [channelId],
+  const resolvedChatName = capitalizeName(chatName || channelName || 'chat');
+  const isDirect = chatType === 'direct';
+
+  const [effectiveChannelId, setEffectiveChannelId] = useState(
+    isUuid(channelId) ? channelId : isUuid(chatId) ? chatId : null,
   );
+  const [messages, setMessages] = useState([]);
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [peerPhone, setPeerPhone] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
 
-  const placeholder = `${CHAT_MESSAGE_PLACEHOLDER_PREFIX}${channelName}`;
+  const isBusy = sending || uploadingMedia;
+
+  const appendMessage = useCallback(newMessage => {
+    setMessages(current => {
+      if (current.some(item => item.id === newMessage.id)) {
+        return current;
+      }
+      return [...current, newMessage];
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      if (!user?.id) {
+        return;
+      }
+
+      let nextChannelId = isUuid(channelId) ? channelId : isUuid(chatId) ? chatId : null;
+
+      if (isSupabaseConfigured) {
+        try {
+          const resolved = await resolveChannelForChatParams(user.id, {
+            chatType,
+            chatId,
+            channelId: nextChannelId,
+            chatName: resolvedChatName,
+            peerId,
+            memberIds,
+            currentUserName: user.name,
+          });
+          nextChannelId = resolved.channelId || resolved.chatId;
+        } catch (error) {
+          if (__DEV__) {
+            console.log('[chat] resolve channel failed', error?.message);
+          }
+        }
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      setEffectiveChannelId(nextChannelId);
+
+      if (!nextChannelId || !isSupabaseConfigured) {
+        setMessages([]);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const rows = await fetchChannelMessages(nextChannelId);
+        if (!cancelled) {
+          setMessages(rows);
+          await markChannelAsRead({ channelId: nextChannelId, userId: user.id });
+        }
+      } catch {
+        if (!cancelled) {
+          Alert.alert('Chat', CHAT_LOAD_ERROR);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [channelId, chatId, chatType, memberIds, peerId, resolvedChatName, user?.id]);
+
+  useEffect(() => {
+    if (!effectiveChannelId || !isSupabaseConfigured) {
+      return undefined;
+    }
+
+    return subscribeToChannelMessages(effectiveChannelId, newMessage => {
+      appendMessage(newMessage);
+      if (user?.id) {
+        markChannelAsRead({ channelId: effectiveChannelId, userId: user.id }).catch(() => {});
+      }
+    });
+  }, [appendMessage, effectiveChannelId, user?.id]);
+
+  useEffect(() => {
+    if (!isDirect || !peerId) {
+      setPeerPhone('');
+      return;
+    }
+
+    let cancelled = false;
+
+    getEmployeeProfileById(peerId)
+      .then(profile => {
+        if (!cancelled) {
+          setPeerPhone(profile?.phone?.trim() || '');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPeerPhone('');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isDirect, peerId]);
+
+  const visibleMessages = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!searchOpen || !query) {
+      return messages;
+    }
+
+    return messages.filter(item => {
+      const haystack = [item.text, item.fileName, item.mediaUrl]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [messages, searchOpen, searchQuery]);
+
+  useEffect(() => {
+    if (searchOpen || messages.length === 0) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [messages.length, searchOpen]);
+
+  const handleCallPeer = async () => {
+    const digits = peerPhone.replace(/\D/g, '');
+
+    if (!digits) {
+      Alert.alert(resolvedChatName, CALL_EMPLOYEE_NO_PHONE);
+      return;
+    }
+
+    try {
+      await Linking.openURL(`tel:${digits}`);
+    } catch {
+      Alert.alert(CALL_EMPLOYEE_CALL_BUTTON, CALL_EMPLOYEE_DIALER_ERROR);
+    }
+  };
+
+  const toggleSearch = () => {
+    setSearchOpen(current => {
+      if (current) {
+        setSearchQuery('');
+      }
+      return !current;
+    });
+  };
+
+  const placeholder = isDirect
+    ? `${CHAT_MESSAGE_PLACEHOLDER_DIRECT}${resolvedChatName}`
+    : `${CHAT_MESSAGE_PLACEHOLDER_PREFIX}${resolvedChatName}`;
+
+  const handleSendMedia = async ({ uri, fileName, mimeType }) => {
+    if (!uri || !effectiveChannelId || !user?.id || !isSupabaseConfigured || uploadingMedia) {
+      return;
+    }
+
+    setUploadingMedia(true);
+    try {
+      const uploaded = await uploadChatMedia({ uri, fileName, mimeType });
+      const newMessage = await sendChannelMessage({
+        channelId: effectiveChannelId,
+        senderId: user.id,
+        senderName: user.name,
+        content: uploaded.fileName,
+        messageType: uploaded.messageType,
+        mediaUrl: uploaded.mediaUrl,
+        mediaType: uploaded.mediaType,
+        fileName: uploaded.fileName,
+        fileSize: uploaded.fileSize,
+      });
+      appendMessage(newMessage);
+    } catch (error) {
+      if (__DEV__) {
+        console.warn('[chat] media send failed:', error?.message || error);
+      }
+      Alert.alert('Chat', CHAT_MEDIA_UPLOAD_ERROR);
+    } finally {
+      setUploadingMedia(false);
+    }
+  };
+
+  const runMediaPicker = async type => {
+    if (pickingMediaRef.current || uploadingMedia) {
+      return;
+    }
+
+    pickingMediaRef.current = true;
+
+    try {
+      if (type === 'photo' || type === 'video') {
+        const result = await launchImageLibrary({
+          mediaType: type === 'photo' ? 'photo' : 'video',
+          selectionLimit: 1,
+          quality: type === 'photo' ? 0.85 : 1,
+          ...(Platform.OS === 'ios' ? { presentationStyle: 'fullScreen' } : {}),
+        });
+
+        if (result.didCancel || result.errorCode || !result.assets?.length) {
+          return;
+        }
+
+        const asset = result.assets[0];
+        await handleSendMedia({
+          uri: asset.uri,
+          fileName:
+            asset.fileName ||
+            (type === 'photo' ? `photo-${Date.now()}.jpg` : `video-${Date.now()}.mp4`),
+          mimeType: asset.type || (type === 'photo' ? 'image/jpeg' : 'video/mp4'),
+        });
+        return;
+      }
+
+      if (type === 'file') {
+        const [file] = await pick({
+          type: [types.allFiles],
+          allowMultiSelection: false,
+          copyTo: 'cachesDirectory',
+          ...(Platform.OS === 'ios' ? { presentationStyle: 'fullScreen' } : {}),
+        });
+
+        if (!file?.uri) {
+          return;
+        }
+
+        await handleSendMedia({
+          uri: file.uri,
+          fileName: file.name || `file-${Date.now()}`,
+          mimeType: file.type || 'application/octet-stream',
+        });
+      }
+    } catch (error) {
+      if (error?.code === 'DOCUMENT_PICKER_CANCELED' || error?.code === 'OPERATION_CANCELED') {
+        return;
+      }
+      Alert.alert('Chat', CHAT_MEDIA_UPLOAD_ERROR);
+    } finally {
+      pickingMediaRef.current = false;
+    }
+  };
+
+  const scheduleMediaPicker = type => {
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => runMediaPicker(type), Platform.OS === 'ios' ? 350 : 150);
+    });
+  };
+
+  const handleAttachSelect = type => {
+    if (pickingMediaRef.current || uploadingMedia) {
+      return;
+    }
+
+    setAttachOpen(false);
+
+    if (Platform.OS === 'ios') {
+      pendingAttachRef.current = type;
+      // Fallback when Modal onDismiss does not fire on some iOS builds
+      setTimeout(() => {
+        if (pendingAttachRef.current !== type) {
+          return;
+        }
+        pendingAttachRef.current = null;
+        scheduleMediaPicker(type);
+      }, 650);
+      return;
+    }
+
+    scheduleMediaPicker(type);
+  };
+
+  const handleAttachModalDismiss = () => {
+    if (Platform.OS !== 'ios') {
+      return;
+    }
+
+    const type = pendingAttachRef.current;
+    if (!type) {
+      return;
+    }
+
+    pendingAttachRef.current = null;
+    scheduleMediaPicker(type);
+  };
+
+  const renderMessage = (item, index, list) => {
+    const isOwn = item.senderId === user?.id;
+    const clusterStart = isClusterStart(list, index);
+    const showAvatar = shouldShowAvatar(list, index, user?.id);
+    const marginTop = clusterStart ? hp(1.2) : hp(0.35);
+
+    if (item.isBroadcast) {
+      return (
+        <View key={item.id} style={[styles.broadcastRow, { marginTop }]}>
+          <View style={styles.broadcastHeader}>
+            <View style={[styles.avatarSmall, { backgroundColor: item.color }]}>
+              <Text style={styles.avatarText}>{item.initial}</Text>
+            </View>
+            <Text style={styles.broadcastName}>{item.name}</Text>
+            <View style={styles.broadcastBadge}>
+              <Text style={styles.broadcastBadgeText}>{CHAT_BROADCAST_LABEL}</Text>
+            </View>
+          </View>
+          <ChatMessageContent message={item} isOwn={false} />
+          <Text style={styles.broadcastTime}>{item.time}</Text>
+        </View>
+      );
+    }
+
+    if (isOwn) {
+      return (
+        <View key={item.id} style={[styles.ownRow, { marginTop }]}>
+          <View style={[styles.ownBubble, !clusterStart && styles.ownBubbleStacked]}>
+            <View style={styles.bubbleInner}>
+              <ChatMessageContent message={item} isOwn />
+              <Text style={styles.ownTime}>{item.time}</Text>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View key={item.id} style={[styles.otherRow, { marginTop }]}>
+        {showAvatar ? (
+          <View style={[styles.avatarSmall, { backgroundColor: item.color }]}>
+            <Text style={styles.avatarText}>{item.initial}</Text>
+          </View>
+        ) : (
+          <View style={styles.avatarSpacer} />
+        )}
+        <View style={[styles.otherBubble, !clusterStart && styles.otherBubbleStacked]}>
+          {!isDirect && clusterStart ? (
+            <Text style={styles.otherName}>{item.name}</Text>
+          ) : null}
+          <View style={styles.bubbleInner}>
+            <ChatMessageContent message={item} isOwn={false} />
+            <Text style={styles.otherTime}>{item.time}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const handleSend = async () => {
+    const trimmed = message.trim();
+    if (!trimmed || isBusy) {
+      return;
+    }
+
+    if (!effectiveChannelId || !user?.id || !isSupabaseConfigured) {
+      Alert.alert('Chat', CHAT_SEND_ERROR);
+      return;
+    }
+
+    setSending(true);
+    try {
+      const newMessage = await sendChannelMessage({
+        channelId: effectiveChannelId,
+        senderId: user.id,
+        senderName: user.name,
+        content: trimmed,
+      });
+      setMessage('');
+      appendMessage(newMessage);
+    } catch {
+      Alert.alert('Chat', CHAT_SEND_ERROR);
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -206,56 +529,105 @@ const ChannelChatScreen = () => {
 
         <View style={styles.headerCenter}>
           <Text style={styles.channelTitle} numberOfLines={1}>
-            # {channelName}
+            {isDirect ? resolvedChatName : `# ${resolvedChatName}`}
           </Text>
-          <Text style={styles.memberCount}>
-            {members} {CHAT_MEMBERS_SUFFIX}
-          </Text>
+          {!isDirect ? (
+            <Text style={styles.memberCount}>
+              {members} {CHAT_MEMBERS_SUFFIX}
+            </Text>
+          ) : (
+            <Text style={styles.memberCount}>Direct message</Text>
+          )}
         </View>
 
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerIcon} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Icon name="phone" size={wp(5)} color={darkTextSecondaryColor} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerIcon} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Icon name="search" size={wp(5)} color={darkTextSecondaryColor} />
+          {isDirect ? (
+            <TouchableOpacity
+              style={styles.headerIcon}
+              onPress={handleCallPeer}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Icon name="phone" size={wp(5)} color={darkTextSecondaryColor} />
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            style={styles.headerIcon}
+            onPress={toggleSearch}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Icon
+              name={searchOpen ? 'x' : 'search'}
+              size={wp(5)}
+              color={searchOpen ? PURPLE : darkTextSecondaryColor}
+            />
           </TouchableOpacity>
         </View>
       </View>
+
+      {searchOpen ? (
+        <View style={styles.searchBar}>
+          <Icon name="search" size={wp(4.5)} color={darkTextSecondaryColor} />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder={CHAT_SEARCH_PLACEHOLDER}
+            placeholderTextColor={darkPlaceholderColor}
+            autoFocus
+            returnKeyType="search"
+          />
+          {searchQuery.trim() ? (
+            <Text style={styles.searchCount}>
+              {visibleMessages.length} {CHAT_SEARCH_RESULTS_SUFFIX}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? hp(1) : 0}>
-        <ScrollView
-          style={styles.messageList}
-          contentContainerStyle={styles.messageListContent}
-          showsVerticalScrollIndicator={false}>
-          {messages.map(item => (
-            <View
-              key={item.id}
-              style={[styles.messageRow, item.isBroadcast && styles.broadcastRow]}>
-              <View style={[styles.avatar, { backgroundColor: item.color }]}>
-                <Text style={styles.avatarText}>{item.initial}</Text>
+        {loading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator size="small" color={PURPLE} />
+          </View>
+        ) : (
+          <ScrollView
+            ref={scrollRef}
+            style={styles.messageList}
+            contentContainerStyle={styles.messageListContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            onContentSizeChange={() => {
+              if (!searchOpen) {
+                scrollRef.current?.scrollToEnd({ animated: true });
+              }
+            }}>
+            {visibleMessages.length === 0 ? (
+              <View style={styles.emptyWrap}>
+                <Text style={styles.emptyText}>
+                  {searchOpen && searchQuery.trim()
+                    ? CHAT_SEARCH_NO_RESULTS
+                    : CHAT_EMPTY_THREAD}
+                </Text>
               </View>
-
-              <View style={styles.messageBody}>
-                <View style={styles.messageHeader}>
-                  <Text style={styles.senderName}>{item.name}</Text>
-                  {item.isBroadcast ? (
-                    <View style={styles.broadcastBadge}>
-                      <Text style={styles.broadcastBadgeText}>{CHAT_BROADCAST_LABEL}</Text>
-                    </View>
-                  ) : null}
-                  <Text style={styles.messageTime}>{item.time}</Text>
-                </View>
-                <Text style={styles.messageText}>{item.text}</Text>
-              </View>
-            </View>
-          ))}
-        </ScrollView>
+            ) : (
+              visibleMessages.map((item, index) => renderMessage(item, index, visibleMessages))
+            )}
+          </ScrollView>
+        )}
 
         <View style={styles.inputBar}>
+          <TouchableOpacity
+            style={styles.attachButton}
+            onPress={() => {
+              if (!isBusy && !pickingMediaRef.current) {
+                setAttachOpen(true);
+              }
+            }}
+            disabled={isBusy || pickingMediaRef.current}
+            activeOpacity={0.85}>
+            <Icon name="plus" size={wp(5.5)} color={darkTextSecondaryColor} />
+          </TouchableOpacity>
           <TextInput
             style={styles.input}
             value={message}
@@ -263,15 +635,42 @@ const ChannelChatScreen = () => {
             placeholder={placeholder}
             placeholderTextColor={darkPlaceholderColor}
             multiline
+            editable={!isBusy}
           />
           <TouchableOpacity
-            style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
-            disabled={!message.trim()}
+            style={[styles.sendButton, (!message.trim() || isBusy) && styles.sendButtonDisabled]}
+            disabled={!message.trim() || isBusy}
+            onPress={handleSend}
             activeOpacity={0.85}>
-            <Icon name="send" size={wp(4.5)} color={darkTextPrimaryColor} />
+            {sending ? (
+              <ActivityIndicator size="small" color={darkTextPrimaryColor} />
+            ) : (
+              <Icon name="send" size={wp(4.5)} color={darkTextPrimaryColor} />
+            )}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      <ChatAttachModal
+        visible={attachOpen}
+        onClose={() => setAttachOpen(false)}
+        onSelect={handleAttachSelect}
+        onDismiss={handleAttachModalDismiss}
+      />
+
+      <Modal
+        visible={uploadingMedia}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => {}}>
+        <View style={styles.uploadOverlay}>
+          <View style={styles.uploadCard}>
+            <ActivityIndicator size="large" color={PURPLE} />
+            <Text style={styles.uploadText}>{CHAT_UPLOADING_MEDIA}</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -320,51 +719,162 @@ const styles = StyleSheet.create({
   headerIcon: {
     padding: wp(1),
   },
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   messageList: {
     flex: 1,
+    backgroundColor: CHAT_BG,
   },
   messageListContent: {
     paddingHorizontal: HORIZONTAL_PAD,
-    paddingTop: hp(2),
+    paddingTop: hp(1.5),
     paddingBottom: hp(2),
-    gap: hp(2.2),
+    flexGrow: 1,
   },
-  messageRow: {
+  searchBar: {
     flexDirection: 'row',
-    gap: wp(3),
+    alignItems: 'center',
+    gap: wp(2.5),
+    paddingHorizontal: HORIZONTAL_PAD,
+    paddingVertical: hp(1),
+    borderBottomWidth: 1,
+    borderBottomColor: darkBorderColor,
+    backgroundColor: darkBackgroundColor,
   },
-  broadcastRow: {
-    backgroundColor: darkSurfaceColor,
-    borderRadius: wp(3),
-    borderWidth: 1,
-    borderColor: darkBorderColor,
-    padding: wp(3),
-    marginHorizontal: -wp(1),
+  searchInput: {
+    flex: 1,
+    ...style.fontSizeNormal,
+    color: darkTextPrimaryColor,
+    paddingVertical: hp(0.6),
   },
-  avatar: {
+  searchCount: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+  },
+  ownRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingLeft: wp(16),
+  },
+  otherRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingRight: wp(16),
+    gap: wp(2),
+  },
+  bubbleInner: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+    columnGap: wp(2),
+    rowGap: hp(0.2),
+  },
+  ownBubble: {
+    maxWidth: wp(74),
+    backgroundColor: OWN_BUBBLE,
+    borderRadius: wp(4),
+    borderBottomRightRadius: wp(1.2),
+    paddingHorizontal: wp(3.2),
+    paddingVertical: hp(0.75),
+  },
+  ownBubbleStacked: {
+    borderBottomRightRadius: wp(4),
+    borderTopRightRadius: wp(1.2),
+  },
+  otherBubble: {
+    maxWidth: wp(74),
+    backgroundColor: OTHER_BUBBLE,
+    borderRadius: wp(4),
+    borderBottomLeftRadius: wp(1.2),
+    paddingHorizontal: wp(3.2),
+    paddingVertical: hp(0.75),
+  },
+  otherBubbleStacked: {
+    borderBottomLeftRadius: wp(4),
+    borderTopLeftRadius: wp(1.2),
+  },
+  bubbleText: {
+    ...style.fontSizeNormal,
+    color: darkTextPrimaryColor,
+    lineHeight: hp(2.35),
+    flexShrink: 1,
+  },
+  ownBubbleText: {
+    color: '#F5F5F5',
+  },
+  ownTime: {
+    ...style.fontSizeSmall,
+    color: 'rgba(255, 255, 255, 0.55)',
+    marginLeft: wp(2),
+    marginBottom: hp(0.1),
+  },
+  otherTime: {
+    ...style.fontSizeSmall,
+    color: 'rgba(255, 255, 255, 0.45)',
+    marginLeft: wp(2),
+    marginBottom: hp(0.1),
+  },
+  otherName: {
+    ...style.fontSizeSmall2x,
+    ...style.fontWeightMedium,
+    color: PURPLE,
+    marginBottom: hp(0.2),
+  },
+  attachButton: {
     width: wp(10),
     height: wp(10),
     borderRadius: wp(5),
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: hp(0.15),
   },
-  avatarText: {
-    ...style.fontSizeSmall2x,
-    ...style.fontWeightMedium1x,
-    color: darkTextPrimaryColor,
+  avatarSmall: {
+    width: wp(8),
+    height: wp(8),
+    borderRadius: wp(4),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  messageBody: {
-    flex: 1,
-    minWidth: 0,
+  avatarSpacer: {
+    width: wp(8),
   },
-  messageHeader: {
+  broadcastRow: {
+    alignSelf: 'stretch',
+    backgroundColor: darkSurfaceColor,
+    borderRadius: wp(3),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    padding: wp(3),
+    marginBottom: hp(0.6),
+  },
+  broadcastHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: wp(2),
-    marginBottom: hp(0.4),
+    marginBottom: hp(0.6),
   },
-  senderName: {
+  broadcastText: {
+    ...style.fontSizeNormal,
+    color: darkTextSecondaryColor,
+    lineHeight: hp(2.6),
+  },
+  broadcastTime: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+    marginTop: hp(0.5),
+    alignSelf: 'flex-end',
+  },
+  avatarText: {
+    ...style.fontSizeSmall,
+    ...style.fontWeightMedium1x,
+    color: darkTextPrimaryColor,
+  },
+  broadcastName: {
     ...style.fontSizeNormal,
     ...style.fontWeightMedium,
     color: darkTextPrimaryColor,
@@ -380,46 +890,72 @@ const styles = StyleSheet.create({
     color: PURPLE,
     ...style.fontWeightMedium,
   },
-  messageTime: {
-    ...style.fontSizeSmall,
-    color: darkTextSecondaryColor,
-    marginLeft: 'auto',
+  emptyWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: hp(8),
   },
-  messageText: {
+  emptyText: {
     ...style.fontSizeNormal,
     color: darkTextSecondaryColor,
-    lineHeight: hp(2.6),
+    textAlign: 'center',
   },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: HORIZONTAL_PAD,
-    paddingVertical: hp(1.4),
+    paddingVertical: hp(1.2),
+    backgroundColor: darkBackgroundColor,
     borderTopWidth: 1,
     borderTopColor: darkBorderColor,
-    gap: wp(2.5),
+    gap: wp(2),
   },
   input: {
     flex: 1,
     backgroundColor: darkInputBgColor,
-    borderRadius: wp(5),
+    borderRadius: wp(6),
     borderWidth: 1,
     borderColor: darkBorderColor,
     paddingHorizontal: wp(4),
-    paddingVertical: hp(1.2),
+    paddingVertical: hp(1.1),
     maxHeight: hp(12),
     ...style.fontSizeNormal,
     color: darkTextPrimaryColor,
   },
   sendButton: {
-    width: wp(11),
-    height: wp(11),
-    borderRadius: wp(5.5),
+    width: wp(10.5),
+    height: wp(10.5),
+    borderRadius: wp(5.25),
     backgroundColor: PURPLE,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: hp(0.15),
   },
   sendButtonDisabled: {
     opacity: 0.45,
+  },
+  uploadOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: wp(8),
+  },
+  uploadCard: {
+    backgroundColor: darkSurfaceColor,
+    borderRadius: wp(4),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    paddingHorizontal: wp(8),
+    paddingVertical: hp(3),
+    alignItems: 'center',
+    gap: hp(1.5),
+    minWidth: wp(55),
+  },
+  uploadText: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium,
+    color: darkTextPrimaryColor,
   },
 });

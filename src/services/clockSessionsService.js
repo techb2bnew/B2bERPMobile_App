@@ -1,4 +1,9 @@
-import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
+import {
+  createRealtimeChannelName,
+  getSupabase,
+  isSupabaseConfigured,
+  syncSupabaseRealtimeAuth,
+} from '../lib/supabase';
 
 const CLOCK_SESSIONS_TABLE = 'clock_sessions';
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
@@ -392,4 +397,89 @@ export const fetchHoursForEmployeeInRange = async (
 export const fetchWeeklyHoursForEmployee = async employeeId => {
   const { startDateKey, endDateKey } = getCurrentWeekRange();
   return fetchHoursForEmployeeInRange(employeeId, startDateKey, endDateKey);
+};
+
+const CLOCK_REALTIME_EVENTS = ['INSERT', 'UPDATE'];
+
+export const subscribeToEmployeeClockSessions = (employeeId, onChange) => {
+  if (!isSupabaseConfigured || !employeeId) {
+    return () => {};
+  }
+
+  let active = true;
+  let channel = null;
+  let reconnectTimer = null;
+  const onChangeRef = { current: onChange };
+  onChangeRef.current = onChange;
+
+  const teardownChannel = () => {
+    if (channel) {
+      getSupabase().removeChannel(channel);
+      channel = null;
+    }
+  };
+
+  const connect = async () => {
+    if (!active) {
+      return;
+    }
+
+    await syncSupabaseRealtimeAuth();
+
+    if (!active) {
+      return;
+    }
+
+    teardownChannel();
+
+    const supabase = getSupabase();
+    const channelName = createRealtimeChannelName(`clock-sessions-${employeeId}`);
+    const nextChannel = supabase.channel(channelName);
+
+    CLOCK_REALTIME_EVENTS.forEach(event => {
+      nextChannel.on(
+        'postgres_changes',
+        {
+          event,
+          schema: 'public',
+          table: CLOCK_SESSIONS_TABLE,
+          filter: `employee_id=eq.${employeeId}`,
+        },
+        payload => {
+          if (__DEV__) {
+            console.log('[realtime] clock_sessions event', payload.eventType);
+          }
+          onChangeRef.current(payload);
+        },
+      );
+    });
+
+    channel = nextChannel;
+
+    channel.subscribe((status, err) => {
+      if (__DEV__) {
+        console.log('[realtime] clock_sessions channel', channelName, status, err?.message || '');
+      }
+
+      if (!active) {
+        return;
+      }
+
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        reconnectTimer = setTimeout(() => {
+          connect();
+        }, 2000);
+      }
+    });
+  };
+
+  connect();
+
+  return () => {
+    active = false;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+    }
+    teardownChannel();
+  };
 };

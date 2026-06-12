@@ -7,7 +7,9 @@ import {
   formatWorkHours,
   getEmptyWeeklyHours,
   getLocalDateKey,
+  subscribeToEmployeeClockSessions,
 } from '../services/clockSessionsService';
+import { syncSupabaseRealtimeAuth } from '../lib/supabase';
 
 const applyLiveTodayHours = (weeklyData, elapsedSeconds) => {
   if (!weeklyData) {
@@ -54,14 +56,16 @@ export const useWeeklyHours = employeeId => {
   const [weeklyData, setWeeklyData] = useState(getEmptyWeeklyHours());
   const [loading, setLoading] = useState(true);
 
-  const loadWeeklyHours = useCallback(async () => {
+  const loadWeeklyHours = useCallback(async ({ silent = false } = {}) => {
     if (!employeeId) {
       setWeeklyData(getEmptyWeeklyHours());
       setLoading(false);
       return;
     }
 
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
 
     try {
       const data = await fetchWeeklyHoursForEmployee(employeeId);
@@ -69,7 +73,9 @@ export const useWeeklyHours = employeeId => {
     } catch {
       setWeeklyData(getEmptyWeeklyHours());
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [employeeId]);
 
@@ -84,8 +90,22 @@ export const useWeeklyHours = employeeId => {
       return;
     }
 
-    loadWeeklyHours();
+    loadWeeklyHours({ silent: true });
   }, [employeeId, isClockedIn, elapsedSeconds, loadWeeklyHours]);
+
+  useEffect(() => {
+    if (!employeeId) {
+      return undefined;
+    }
+
+    syncSupabaseRealtimeAuth().catch(() => {});
+
+    const unsubscribe = subscribeToEmployeeClockSessions(employeeId, () => {
+      loadWeeklyHours({ silent: true });
+    });
+
+    return unsubscribe;
+  }, [employeeId, loadWeeklyHours]);
 
   return {
     weeklyData: applyLiveTodayHours(weeklyData, elapsedSeconds),
