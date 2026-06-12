@@ -17,6 +17,7 @@ const AuthStack = () => {
         headerShown: false,
         contentStyle: { backgroundColor: darkBackgroundColor },
         animation: 'slide_from_right',
+        gestureEnabled: false,
       }}>
       <Stack.Screen
         name={AUTH_ROUTES.ROLE_SELECTION}

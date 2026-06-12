@@ -86,6 +86,23 @@ export const createEmployeeProfile = async (payload, profileId) => {
   return data;
 };
 
+export const fetchAllEmployeeProfiles = async () => {
+  if (!isSupabaseConfigured) {
+    throw new Error('Supabase is not configured');
+  }
+
+  const { data, error } = await getSupabase()
+    .from(EMPLOYEE_PROFILES_TABLE)
+    .select('id, name, email, phone')
+    .order('name');
+
+  if (error) {
+    throw new Error(error.message || 'Failed to load employees');
+  }
+
+  return data || [];
+};
+
 export const getEmployeeProfileByEmail = async email => {
   if (!isSupabaseConfigured) {
     throw new Error('Supabase is not configured');

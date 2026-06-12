@@ -1,5 +1,9 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  InteractionManager,
   ScrollView,
   StyleSheet,
   Text,
@@ -7,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import AiAssistant from '../../components/AiAssistant';
 import TaskDetailModal from '../../components/Modal/TaskDetailModal';
@@ -23,7 +27,7 @@ import {
   TASK_FILTER_TODO,
   TASK_MANAGEMENT_TITLE,
   TASK_NEW_BUTTON,
-  TASK_STATUS_REVIEW,
+  TASK_STATUS_READY_FOR_TESTING,
   TASK_VIEW_KANBAN,
   TASK_VIEW_LIST,
 } from '../../constants/Constants';
@@ -37,7 +41,19 @@ import {
   darkTextSecondaryColor,
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
+import {
+  createProjectTask,
+  fetchProjectTasksForUser,
+  mapProjectTaskRowToApp,
+  subscribeToUserProjectTasksChanges,
+  updateProjectTask,
+  updateProjectTaskStatus,
+} from '../../services/projectTasksService';
+import { syncSupabaseRealtimeAuth } from '../../lib/supabase';
+import { isEmployeeUser } from '../../constants/roles';
 import { getFirstName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
+
+const TASKS_POLL_INTERVAL_MS = 5000;
 
 const PURPLE = '#9B59B6';
 const BLUE = '#2D7DD2';
@@ -45,14 +61,14 @@ const BLUE = '#2D7DD2';
 const KANBAN_COLUMNS = [
   TASK_FILTER_TODO,
   TASK_FILTER_IN_PROGRESS,
-  TASK_STATUS_REVIEW,
+  TASK_STATUS_READY_FOR_TESTING,
   TASK_FILTER_DONE,
 ];
 
 const COLUMN_COLORS = {
   [TASK_FILTER_TODO]: darkTextSecondaryColor,
   [TASK_FILTER_IN_PROGRESS]: BLUE,
-  [TASK_STATUS_REVIEW]: PURPLE,
+  [TASK_STATUS_READY_FOR_TESTING]: PURPLE,
   [TASK_FILTER_DONE]: darkAccentGreenColor,
 };
 
@@ -68,24 +84,6 @@ const DEFAULT_FILTERS = {
   status: TASK_FILTER_ALL_STATUSES,
 };
 
-const PROJECT_TASKS = {
-  erp: [],
-  jdp: [
-    {
-      id: '1',
-      title: 'Fix issues',
-      description: 'Worked on fix filter issue',
-      status: TASK_FILTER_IN_PROGRESS,
-      priority: 'medium',
-      project: 'JDP',
-      estimatedHours: '4',
-      hoursWorked: '4h worked',
-      assignee: 'shubham',
-      dueDate: 'Jun 11',
-    },
-  ],
-};
-
 const TaskManagementScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
@@ -93,9 +91,21 @@ const TaskManagementScreen = () => {
   const { projectId, projectName } = route.params || {};
 
   const displayName = getFirstName(user?.name || 'User').toLowerCase();
-  const defaultAssignee = displayName;
+  const defaultAssignee = user?.name || displayName;
+  const defaultAssigneeId = user?.id || '';
+  const isEmployee = isEmployeeUser(user);
 
-  const [tasks, setTasks] = useState(PROJECT_TASKS[projectId] || []);
+  const kanbanColumns = useMemo(
+    () =>
+      isEmployee
+        ? KANBAN_COLUMNS.filter(column => column !== TASK_FILTER_DONE)
+        : KANBAN_COLUMNS,
+    [isEmployee],
+  );
+
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [selectedTask, setSelectedTask] = useState(null);
   const [formMode, setFormMode] = useState('edit');
@@ -110,6 +120,155 @@ const TaskManagementScreen = () => {
   const dragStateRef = useRef(null);
   const cardDragTimers = useRef({});
   const cardTouchStart = useRef({});
+  const taskMetaRef = useRef({ name: '', assigneeName: '' });
+  const isSavingRef = useRef(false);
+  const pendingRealtimeRefreshRef = useRef(false);
+
+  const taskMeta = useMemo(
+    () => ({
+      name: projectName || '',
+      assigneeName: defaultAssignee,
+    }),
+    [defaultAssignee, projectName],
+  );
+
+  taskMetaRef.current = taskMeta;
+
+  useEffect(() => {
+    isSavingRef.current = saving;
+  }, [saving]);
+
+  const loadProjectTasks = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!projectId || !defaultAssigneeId) {
+        setTasks([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!silent) {
+        setLoading(true);
+      }
+
+      try {
+        const rows = await fetchProjectTasksForUser(projectId, defaultAssigneeId);
+        setTasks(rows.map(row => mapProjectTaskRowToApp(row, taskMeta)));
+      } catch (error) {
+        Alert.alert('Load Failed', error?.message || 'Unable to load project tasks.');
+        setTasks([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [defaultAssigneeId, projectId, taskMeta],
+  );
+
+  const flushPendingRealtimeRefresh = useCallback(() => {
+    if (pendingRealtimeRefreshRef.current) {
+      pendingRealtimeRefreshRef.current = false;
+      loadProjectTasks({ silent: true });
+    }
+  }, [loadProjectTasks]);
+
+  const applyRealtimePayloadRef = useRef(null);
+
+  const applyRealtimePayload = useCallback(
+    payload => {
+      if (isSavingRef.current) {
+        pendingRealtimeRefreshRef.current = true;
+        return;
+      }
+
+      const eventType = payload?.eventType;
+      const deletedId = payload?.old?.id;
+
+      if (eventType === 'DELETE' && deletedId) {
+        setTasks(prev => prev.filter(task => task.id !== deletedId));
+        return;
+      }
+
+      const row = payload?.new;
+      if (!row) {
+        loadProjectTasks({ silent: true });
+        return;
+      }
+
+      if (row.project_id !== projectId || row.assignee_id !== defaultAssigneeId) {
+        setTasks(prev => prev.filter(task => task.id !== row.id));
+        return;
+      }
+
+      const appTask = mapProjectTaskRowToApp(row, taskMetaRef.current);
+
+      if (isEmployee && appTask.status === TASK_FILTER_DONE) {
+        setTasks(prev => prev.filter(task => task.id !== row.id));
+        return;
+      }
+
+      setTasks(prev => {
+        const exists = prev.some(task => task.id === row.id);
+
+        if (eventType === 'INSERT' && !exists) {
+          return [...prev, appTask];
+        }
+
+        if (!exists) {
+          return [...prev, appTask];
+        }
+
+        return prev.map(task => (task.id === row.id ? appTask : task));
+      });
+    },
+    [defaultAssigneeId, isEmployee, loadProjectTasks, projectId],
+  );
+
+  applyRealtimePayloadRef.current = applyRealtimePayload;
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const refreshTasks = () => {
+        if (active) {
+          loadProjectTasks({ silent: true });
+        }
+      };
+
+      loadProjectTasks();
+      syncSupabaseRealtimeAuth().catch(() => {});
+
+      const pollTimer = setInterval(refreshTasks, TASKS_POLL_INTERVAL_MS);
+
+      const appStateSub = AppState.addEventListener('change', nextState => {
+        if (nextState === 'active') {
+          syncSupabaseRealtimeAuth().catch(() => {});
+          refreshTasks();
+        }
+      });
+
+      return () => {
+        active = false;
+        clearInterval(pollTimer);
+        appStateSub.remove();
+      };
+    }, [loadProjectTasks]),
+  );
+
+  useEffect(() => {
+    if (!projectId || !defaultAssigneeId) {
+      return undefined;
+    }
+
+    const unsubscribe = subscribeToUserProjectTasksChanges(
+      projectId,
+      defaultAssigneeId,
+      payload => {
+        applyRealtimePayloadRef.current?.(payload);
+      },
+    );
+
+    return unsubscribe;
+  }, [defaultAssigneeId, projectId]);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -121,13 +280,16 @@ const TaskManagementScreen = () => {
 
   const filteredTasks = useMemo(() => {
     const query = filters.search.trim().toLowerCase();
+    const visibleTasks = isEmployee
+      ? tasks.filter(task => task.status !== TASK_FILTER_DONE)
+      : tasks;
 
-    return tasks.filter(task => {
+    return visibleTasks.filter(task => {
       const matchesSearch =
         !query ||
         task.title.toLowerCase().includes(query) ||
-        task.assignee.toLowerCase().includes(query) ||
-        task.project.toLowerCase().includes(query);
+        (task.assignee || '').toLowerCase().includes(query) ||
+        (task.project || '').toLowerCase().includes(query);
 
       const matchesPriority =
         filters.priority === TASK_FILTER_ALL_PRIORITIES ||
@@ -138,18 +300,18 @@ const TaskManagementScreen = () => {
 
       return matchesSearch && matchesPriority && matchesStatus;
     });
-  }, [tasks, filters]);
+  }, [isEmployee, tasks, filters]);
 
   const tasksByColumn = useMemo(() => {
-    return KANBAN_COLUMNS.reduce((acc, column) => {
+    return kanbanColumns.reduce((acc, column) => {
       acc[column] = filteredTasks.filter(task => task.status === column);
       return acc;
     }, {});
-  }, [filteredTasks]);
+  }, [filteredTasks, kanbanColumns]);
 
   const openCreateTask = (status = TASK_FILTER_TODO) => {
     setFormMode('create');
-    setSelectedTask({ assignee: defaultAssignee });
+    setSelectedTask({ assignee: defaultAssignee, assigneeId: defaultAssigneeId });
     setDefaultStatus(status);
     setFormVisible(true);
   };
@@ -160,15 +322,34 @@ const TaskManagementScreen = () => {
     setFormVisible(true);
   };
 
-  const moveTaskToColumn = useCallback((taskId, newStatus) => {
-    setTasks(prev =>
-      prev.map(task => (task.id === taskId ? { ...task, status: newStatus } : task)),
-    );
-  }, []);
+  const moveTaskToColumn = useCallback(
+    async (taskId, newStatus) => {
+      if (isEmployee && newStatus === TASK_FILTER_DONE) {
+        return;
+      }
+
+      const previousTasks = tasks;
+      setTasks(prev =>
+        prev.map(task => (task.id === taskId ? { ...task, status: newStatus } : task)),
+      );
+
+      setSaving(true);
+      try {
+        await updateProjectTaskStatus(taskId, newStatus);
+      } catch (error) {
+        setTasks(previousTasks);
+        Alert.alert('Update Failed', error?.message || 'Unable to update task status.');
+      } finally {
+        setSaving(false);
+        flushPendingRealtimeRefresh();
+      }
+    },
+    [flushPendingRealtimeRefresh, isEmployee, tasks],
+  );
 
   const findColumnAtPoint = useCallback((x, y) => {
     return new Promise(resolve => {
-      const columns = KANBAN_COLUMNS;
+      const columns = kanbanColumns;
       let pending = columns.length;
       let matched = null;
 
@@ -199,7 +380,7 @@ const TaskManagementScreen = () => {
         });
       });
     });
-  }, []);
+  }, [kanbanColumns]);
 
   const endDrag = useCallback(
     async (x, y) => {
@@ -283,20 +464,90 @@ const TaskManagementScreen = () => {
     cardTouchStart.current[task.id] = null;
   };
 
-  const handleSaveTask = (taskData, isCreate) => {
-    if (isCreate) {
-      const newTask = {
-        ...taskData,
-        id: Date.now().toString(),
-        project: projectName,
-      };
-      setTasks(prev => [...prev, newTask]);
-      return;
+  const waitForModalDismiss = () =>
+    new Promise(resolve => {
+      InteractionManager.runAfterInteractions(() => {
+        requestAnimationFrame(resolve);
+      });
+    });
+
+  const handleSaveTask = async (taskData, isCreate) => {
+    if (!projectId || !defaultAssigneeId) {
+      Alert.alert('Save Failed', 'User or project information is missing.');
+      return false;
     }
 
-    setTasks(prev =>
-      prev.map(task => (task.id === taskData.id ? { ...task, ...taskData } : task)),
-    );
+    if (!isCreate && !taskData?.id) {
+      Alert.alert('Save Failed', 'Task id is missing.');
+      return false;
+    }
+
+    if (isEmployee && taskData?.status === TASK_FILTER_DONE) {
+      Alert.alert('Not Allowed', 'Employees can only update tasks up to Ready for Testing.');
+      return false;
+    }
+
+    const payload = {
+      ...taskData,
+      project: projectName,
+      projectId,
+      assigneeId: taskData.assigneeId || defaultAssigneeId,
+      assignee: taskData.assignee || defaultAssignee,
+    };
+
+    console.log('[TaskSave] handleSaveTask', {
+      isCreate,
+      projectId,
+      defaultAssigneeId,
+      taskId: payload.id,
+      payload,
+    });
+
+    setFormVisible(false);
+    await waitForModalDismiss();
+
+    setSaving(true);
+    try {
+      if (isCreate) {
+        const createMeta = { projectId, assigneeId: defaultAssigneeId };
+        console.log('[TaskSave] calling createProjectTask', { payload, createMeta });
+        const createdRow = await createProjectTask(payload, createMeta);
+        console.log('[TaskSave] createProjectTask success', createdRow);
+        setTasks(prev => [...prev, mapProjectTaskRowToApp(createdRow, taskMeta)]);
+        return true;
+      }
+
+      console.log('[TaskSave] calling updateProjectTask', {
+        taskId: payload.id,
+        payload,
+      });
+      const updatedRow = await updateProjectTask(payload.id, payload);
+      console.log('[TaskSave] updateProjectTask success', updatedRow);
+      setTasks(prev =>
+        prev.map(task =>
+          task.id === payload.id ? mapProjectTaskRowToApp(updatedRow, taskMeta) : task,
+        ),
+      );
+      return true;
+    } catch (error) {
+      console.log('[TaskSave] save failed', {
+        isCreate,
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+        error,
+      });
+      setFormMode(isCreate ? 'create' : 'edit');
+      setSelectedTask(payload);
+      setFormVisible(true);
+      Alert.alert('Save Failed', error?.message || 'Unable to save task.');
+      loadProjectTasks({ silent: true });
+      return false;
+    } finally {
+      setSaving(false);
+      flushPendingRealtimeRefresh();
+    }
   };
 
   const renderTaskCardContent = (task, isDragging = false) => {
@@ -372,7 +623,7 @@ const TaskManagementScreen = () => {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{TASK_MANAGEMENT_TITLE}</Text>
           <View style={styles.headerActions}>
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={styles.filterButton}
               onPress={() => setFilterVisible(true)}
               activeOpacity={0.8}>
@@ -383,7 +634,7 @@ const TaskManagementScreen = () => {
                   <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
                 </View>
               ) : null}
-            </TouchableOpacity>
+            </TouchableOpacity> */}
             <TouchableOpacity
               style={styles.newTaskButton}
               onPress={() => openCreateTask()}
@@ -395,9 +646,15 @@ const TaskManagementScreen = () => {
         </View>
 
         <Text style={styles.subtitle}>
-          {projectName} · {displayName}'s Sprint #12 · {filteredTasks.length} task · live from Supabase
+          {projectName || 'Project'} · {displayName}'s tasks · {filteredTasks.length} task
+          {filteredTasks.length === 1 ? '' : 's'} · live from Supabase
+          {saving ? ' · saving...' : ''}
         </Text>
 
+        {loading ? (
+          <ActivityIndicator size="large" color={BLUE} style={styles.loader} />
+        ) : (
+        <>
         <View style={styles.viewTabs}>
           {[TASK_VIEW_KANBAN, TASK_VIEW_LIST].map(view => {
             const isActive = activeView === view;
@@ -426,7 +683,7 @@ const TaskManagementScreen = () => {
             scrollEnabled={!dragState}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.kanbanRow}>
-            {KANBAN_COLUMNS.map(column => {
+            {kanbanColumns.map(column => {
               const columnTasks = tasksByColumn[column] || [];
               const columnColor = COLUMN_COLORS[column];
               const isDropTarget = dragState && hoverColumn === column;
@@ -480,6 +737,8 @@ const TaskManagementScreen = () => {
             )}
           </ScrollView>
         )}
+        </>
+        )}
 
         {dragState ? (
           <View style={styles.dragOverlay} pointerEvents="none">
@@ -502,6 +761,7 @@ const TaskManagementScreen = () => {
         mode={formMode}
         task={selectedTask}
         defaultStatus={defaultStatus}
+        hideDoneStatus={isEmployee}
         onClose={() => setFormVisible(false)}
         onSave={handleSaveTask}
       />
@@ -509,6 +769,7 @@ const TaskManagementScreen = () => {
       <TaskFilterModal
         visible={filterVisible}
         filters={filters}
+        hideDoneStatus={isEmployee}
         onClose={() => setFilterVisible(false)}
         onApply={setFilters}
         onClear={() => setFilters(DEFAULT_FILTERS)}
@@ -597,6 +858,9 @@ const styles = StyleSheet.create({
     color: darkTextSecondaryColor,
     paddingHorizontal: wp(5),
     marginBottom: hp(1.5),
+  },
+  loader: {
+    marginTop: hp(8),
   },
   viewTabs: {
     flexDirection: 'row',

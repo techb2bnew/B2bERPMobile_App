@@ -18,11 +18,11 @@ const AiAssistantFab = ({ onPress, badgeCount = 4 }) => {
         accessibilityRole="button"
         accessibilityLabel="Open AI Assistant">
         <Icon name="cpu" size={wp(6.5)} color={darkTextPrimaryColor} />
-        {badgeCount > 0 ? (
+        {/* {badgeCount > 0 ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{badgeCount}</Text>
           </View>
-        ) : null}
+        ) : null} */}
       </TouchableOpacity>
     </View>
   );

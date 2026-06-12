@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -24,7 +26,7 @@ import {
   TASK_PRIORITY_LABEL,
   TASK_SAVE_TASK_BUTTON,
   TASK_STATUS_LABEL,
-  TASK_STATUS_REVIEW,
+  TASK_STATUS_READY_FOR_TESTING,
   TASK_TITLE_LABEL,
   TASK_TITLE_PLACEHOLDER,
   TASK_UPDATE_TASK_BUTTON,
@@ -40,20 +42,32 @@ import {
   darkTextSecondaryColor,
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
+import { getTodayDueDateLabel } from '../../utils/projectUtils';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const PURPLE = '#9B59B6';
 
-const STATUS_OPTIONS = [
+const ALL_STATUS_OPTIONS = [
   TASK_FILTER_TODO,
   TASK_FILTER_IN_PROGRESS,
-  TASK_STATUS_REVIEW,
+  TASK_STATUS_READY_FOR_TESTING,
   TASK_FILTER_DONE,
 ];
 
 const PRIORITY_OPTIONS = ['low', 'medium', 'high'];
 
-const TaskDetailModal = ({ visible, mode = 'edit', task, defaultStatus, onClose, onSave }) => {
+const TaskDetailModal = ({
+  visible,
+  mode = 'edit',
+  task,
+  defaultStatus,
+  hideDoneStatus = false,
+  onClose,
+  onSave,
+}) => {
+  const statusOptions = hideDoneStatus
+    ? ALL_STATUS_OPTIONS.filter(option => option !== TASK_FILTER_DONE)
+    : ALL_STATUS_OPTIONS;
   const isCreate = mode === 'create';
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -62,6 +76,7 @@ const TaskDetailModal = ({ visible, mode = 'edit', task, defaultStatus, onClose,
   const [assignee, setAssignee] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [estimatedHours, setEstimatedHours] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!visible) {
@@ -73,7 +88,7 @@ const TaskDetailModal = ({ visible, mode = 'edit', task, defaultStatus, onClose,
       setStatus(defaultStatus || TASK_FILTER_TODO);
       setPriority('medium');
       setAssignee(task?.assignee || '');
-      setDueDate('');
+      setDueDate(getTodayDueDateLabel());
       setEstimatedHours('');
       return;
     }
@@ -89,8 +104,14 @@ const TaskDetailModal = ({ visible, mode = 'edit', task, defaultStatus, onClose,
     setEstimatedHours(task.estimatedHours || '');
   }, [visible, task, isCreate, defaultStatus]);
 
-  const handleSave = () => {
-    if (!title.trim() || !assignee.trim()) {
+  const handleSave = async () => {
+    if (!title.trim()) {
+      Alert.alert('Required', 'Please enter a task title.');
+      return;
+    }
+
+    if (!assignee.trim()) {
+      Alert.alert('Required', 'Please enter an assignee.');
       return;
     }
 
@@ -101,13 +122,32 @@ const TaskDetailModal = ({ visible, mode = 'edit', task, defaultStatus, onClose,
       status,
       priority,
       assignee: assignee.trim(),
+      assigneeId: task?.assigneeId || '',
       dueDate: dueDate.trim(),
       estimatedHours: estimatedHours.trim(),
-      hoursWorked: estimatedHours.trim() ? `${estimatedHours.trim()}h worked` : task?.hoursWorked || '',
+      hoursWorked: estimatedHours.trim()
+        ? `${estimatedHours.trim()}h worked`
+        : task?.hoursWorked || '',
     };
 
-    onSave(payload, isCreate);
-    onClose();
+    console.log('[TaskModal] save clicked', {
+      mode: isCreate ? 'create' : 'edit',
+      payload,
+      formFields: { title, description, status, priority, assignee, dueDate, estimatedHours },
+    });
+
+    setSaving(true);
+    try {
+      const saved = await onSave(payload, isCreate);
+      console.log('[TaskModal] onSave result', { saved, mode: isCreate ? 'create' : 'edit' });
+      if (saved) {
+        onClose();
+      }
+    } catch (error) {
+      console.log('[TaskModal] onSave threw', error);
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!visible) {
@@ -145,7 +185,7 @@ const TaskDetailModal = ({ visible, mode = 'edit', task, defaultStatus, onClose,
                   <DropdownSelect
                     label={TASK_STATUS_LABEL}
                     value={status}
-                    options={STATUS_OPTIONS}
+                    options={statusOptions}
                     onChange={setStatus}
                   />
                 </View>
@@ -198,8 +238,16 @@ const TaskDetailModal = ({ visible, mode = 'edit', task, defaultStatus, onClose,
                 <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                   <Text style={styles.cancelText}>{TASK_CANCEL_BUTTON}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.saveButton} onPress={handleSave} activeOpacity={0.85}>
-                  <Icon name="save" size={wp(4.5)} color={darkTextPrimaryColor} />
+                <TouchableOpacity
+                  style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                  onPress={handleSave}
+                  disabled={saving}
+                  activeOpacity={0.85}>
+                  {saving ? (
+                    <ActivityIndicator size="small" color={darkTextPrimaryColor} />
+                  ) : (
+                    <Icon name="save" size={wp(4.5)} color={darkTextPrimaryColor} />
+                  )}
                   <Text style={styles.saveButtonText}>
                     {isCreate ? TASK_SAVE_TASK_BUTTON : TASK_UPDATE_TASK_BUTTON}
                   </Text>
@@ -313,5 +361,8 @@ const styles = StyleSheet.create({
     ...style.fontSizeNormal,
     ...style.fontWeightMedium,
     color: darkTextPrimaryColor,
+  },
+  saveButtonDisabled: {
+    opacity: 0.7,
   },
 });

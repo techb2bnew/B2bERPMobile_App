@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import CustomDrawer from '../components/CustomDrawer';
+import { AttendanceProvider } from '../context/AttendanceContext';
 import { DrawerProvider, useDrawer } from '../context/DrawerContext';
 import { darkBackgroundColor } from '../constants/Color';
 import DashboardScreen from '../screens/main/DashboardScreen';
@@ -26,11 +27,12 @@ const MainStackNavigator = () => {
     <View style={styles.root}>
       <Stack.Navigator
         initialRouteName={MAIN_ROUTES.DASHBOARD}
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: darkBackgroundColor },
-          animation: 'slide_from_right',
-        }}>
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: darkBackgroundColor },
+        animation: 'slide_from_right',
+        gestureEnabled: false,
+      }}>
         <Stack.Screen
           name={MAIN_ROUTES.DASHBOARD}
           component={DashboardScreen}
@@ -74,9 +76,11 @@ const MainStackNavigator = () => {
 
 const MainStack = () => {
   return (
-    <DrawerProvider>
-      <MainStackNavigator />
-    </DrawerProvider>
+    <AttendanceProvider>
+      <DrawerProvider>
+        <MainStackNavigator />
+      </DrawerProvider>
+    </AttendanceProvider>
   );
 };
 

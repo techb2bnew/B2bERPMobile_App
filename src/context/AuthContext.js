@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { syncSupabaseRealtimeAuth } from '../lib/supabase';
 import { signOut } from '../services/authService';
 import {
   clearUserSession,
@@ -13,6 +14,7 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   const loadSession = useCallback(async () => {
+    await syncSupabaseRealtimeAuth();
     const session = await getUserSession();
     setUser(session);
     setIsLoading(false);
@@ -23,6 +25,7 @@ export const AuthProvider = ({ children }) => {
   }, [loadSession]);
 
   const login = useCallback(async userData => {
+    await syncSupabaseRealtimeAuth();
     await saveUserSession(userData);
     setUser(userData);
   }, []);

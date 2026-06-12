@@ -39,13 +39,13 @@ const AppHeader = ({ title }) => {
       </Text>
 
       <View style={styles.rightActions}>
-        <TouchableOpacity
+        {/* <TouchableOpacity
           style={styles.iconButton}
           onPress={() => navigation.navigate(MAIN_ROUTES.NOTIFICATIONS)}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Icon name="bell" size={wp(5.2)} color={darkTextPrimaryColor} />
           <View style={styles.bellDot} />
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
         <View style={styles.headerDivider} />
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   FlatList,
   Image,
@@ -19,8 +19,10 @@ import {
   darkTextSecondaryColor,
   whiteColor,
 } from '../constants/Color';
+import ComingSoonModal from '../components/Modal/ComingSoonModal';
 import {
   COMMAND_CENTER_VERSION,
+  EMPLOYEE_ROLE_ID,
   ROLE_SELECTION_SUBTITLE,
   ROLE_SELECTION_TITLE,
   ROLES,
@@ -35,9 +37,15 @@ const CARD_WIDTH = (wp(100) - HORIZONTAL_PADDING * 2 - CARD_GAP) / 2;
 
 const RoleSelectionScreen = () => {
   const navigation = useNavigation();
+  const [showComingSoonModal, setShowComingSoonModal] = useState(false);
 
   const handleRoleSelect = role => {
-    navigation.navigate(AUTH_ROUTES.LOGIN, { selectedRole: role });
+    if (role.id === EMPLOYEE_ROLE_ID) {
+      navigation.navigate(AUTH_ROUTES.LOGIN, { selectedRole: role });
+      return;
+    }
+
+    setShowComingSoonModal(true);
   };
 
   const renderRoleCard = ({ item }) => (
@@ -75,6 +83,11 @@ const RoleSelectionScreen = () => {
           </View>
         }
         renderItem={renderRoleCard}
+      />
+
+      <ComingSoonModal
+        visible={showComingSoonModal}
+        onClose={() => setShowComingSoonModal(false)}
       />
     </SafeAreaView>
   );

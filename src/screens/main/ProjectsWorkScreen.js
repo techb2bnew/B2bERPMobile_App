@@ -1,14 +1,22 @@
-import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import AiAssistant from '../../components/AiAssistant';
 import AppHeader from '../../components/AppHeader';
 import { useAuth } from '../../context/AuthContext';
 import {
   PERSON_SUFFIX,
-  PROJECT_IN_PROGRESS,
   PROJECT_OPEN_TASKS_SUFFIX,
   PROJECT_PEOPLE_SUFFIX,
   PROJECTS_SEARCH_PLACEHOLDER,
@@ -17,6 +25,7 @@ import {
   PROJECTS_WORK_SUBTITLE_SUFFIX,
 } from '../../constants/Constants';
 import {
+  darkAccentGreenColor,
   darkBackgroundColor,
   darkBorderColor,
   darkInputBgColor,
@@ -27,54 +36,134 @@ import {
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
 import { MAIN_ROUTES } from '../../navigation/routes';
+import { syncSupabaseRealtimeAuth } from '../../lib/supabase';
+import { fetchAllEmployeeProfiles } from '../../services/employeeService';
+import {
+  fetchOpenTaskCountsByProject,
+  subscribeToAssigneeProjectTasksChanges,
+} from '../../services/projectTasksService';
+import {
+  fetchProjectsForUser,
+  subscribeToProjectsChanges,
+} from '../../services/projectsService';
+import {
+  buildEmployeeNameMap,
+  getMemberColor,
+  getMemberInitial,
+  getTeamMemberName,
+} from '../../utils/projectUtils';
 import { getFirstName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
-const PURPLE = '#9B59B6';
 const BLUE = '#2D7DD2';
 const CARD_RADIUS = wp(4);
 const HORIZONTAL_PAD = wp(5);
-
-const PROJECTS = [
-  {
-    id: 'erp',
-    name: 'Base2brand ERP',
-    type: 'Internal',
-    status: PROJECT_IN_PROGRESS,
-    members: 1,
-    openTasks: 0,
-    memberInitials: ['S'],
-    memberColors: [PURPLE],
-  },
-  {
-    id: 'jdp',
-    name: 'JDP',
-    type: 'JDP',
-    status: PROJECT_IN_PROGRESS,
-    members: 3,
-    openTasks: 1,
-    memberInitials: ['S', 'D', 'G'],
-    memberColors: [PURPLE, BLUE, '#E84393'],
-  },
-];
+const LIVE_POLL_INTERVAL_MS = 5000;
 
 const ProjectsWorkScreen = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
   const [search, setSearch] = useState('');
+  const [projects, setProjects] = useState([]);
+  const [employeeNameMap, setEmployeeNameMap] = useState({});
+  const [openTaskCounts, setOpenTaskCounts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const isFirstLoad = useRef(true);
 
   const displayName = getFirstName(user?.name || 'User');
+
+  const loadProjects = useCallback(
+    async ({ isRefresh = false, silent = false } = {}) => {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else if (!silent) {
+        setLoading(true);
+      }
+
+      if (!silent) {
+        setError('');
+      }
+
+      try {
+      const [data, employees, taskCounts] = await Promise.all([
+        fetchProjectsForUser(user),
+        fetchAllEmployeeProfiles(),
+        user?.id ? fetchOpenTaskCountsByProject(user.id) : Promise.resolve({}),
+      ]);
+      setProjects(data);
+      setEmployeeNameMap(buildEmployeeNameMap(employees));
+      setOpenTaskCounts(taskCounts);
+      } catch (loadError) {
+        if (!silent) {
+          setError(loadError?.message || 'Unable to load projects.');
+          setProjects([]);
+        }
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [user],
+  );
+
+  const onRefresh = useCallback(() => {
+    loadProjects({ isRefresh: true });
+  }, [loadProjects]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const silent = !isFirstLoad.current;
+      isFirstLoad.current = false;
+
+      const refresh = () => {
+        if (active) {
+          loadProjects({ silent: true });
+        }
+      };
+
+      loadProjects({ silent });
+      syncSupabaseRealtimeAuth().catch(() => {});
+
+      const pollTimer = setInterval(refresh, LIVE_POLL_INTERVAL_MS);
+
+      return () => {
+        active = false;
+        clearInterval(pollTimer);
+      };
+    }, [loadProjects]),
+  );
+
+  useEffect(() => {
+    const refresh = () => {
+      loadProjects({ silent: true });
+    };
+
+    const unsubscribeProjects = subscribeToProjectsChanges(refresh);
+    const unsubscribeTasks = user?.id
+      ? subscribeToAssigneeProjectTasksChanges(user.id, refresh)
+      : () => {};
+
+    return () => {
+      unsubscribeProjects();
+      unsubscribeTasks();
+    };
+  }, [loadProjects, user?.id]);
 
   const filteredProjects = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) {
-      return PROJECTS;
+      return projects;
     }
-    return PROJECTS.filter(
+
+    return projects.filter(
       project =>
-        project.name.toLowerCase().includes(query) ||
-        project.type.toLowerCase().includes(query),
+        project.name?.toLowerCase().includes(query) ||
+        project.client?.toLowerCase().includes(query) ||
+        project.status?.toLowerCase().includes(query),
     );
-  }, [search]);
+  }, [projects, search]);
 
   const openProject = project => {
     navigation.navigate(MAIN_ROUTES.TASK_MANAGEMENT, {
@@ -89,7 +178,15 @@ const ProjectsWorkScreen = () => {
         <AppHeader title={PROJECTS_WORK_TITLE} />
         <ScrollView
           contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}>
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={darkAccentGreenColor}
+              colors={[darkAccentGreenColor]}
+            />
+          }>
           <View style={styles.workspaceRow}>
             <Icon name="folder" size={wp(4)} color={darkTextSecondaryColor} />
             <Text style={styles.workspaceLabel}>{PROJECTS_WORK_WORKSPACE}</Text>
@@ -97,7 +194,7 @@ const ProjectsWorkScreen = () => {
 
           <Text style={styles.heading}>{displayName}'s projects</Text>
           <Text style={styles.subtitle}>
-            {PROJECTS.length} {PROJECTS_WORK_SUBTITLE_SUFFIX}
+            {projects.length} {PROJECTS_WORK_SUBTITLE_SUFFIX}
           </Text>
 
           <View style={styles.searchWrap}>
@@ -111,52 +208,75 @@ const ProjectsWorkScreen = () => {
             />
           </View>
 
-          <View style={styles.projectList}>
-            {filteredProjects.map(project => (
-              <TouchableOpacity
-                key={project.id}
-                style={styles.projectCard}
-                onPress={() => openProject(project)}
-                activeOpacity={0.85}>
-                <View style={styles.cardTop}>
-                  <View style={styles.statusBadge}>
-                    <Text style={styles.statusText}>{project.status}</Text>
-                  </View>
-                  <Icon name="star" size={wp(4.5)} color={darkTextSecondaryColor} />
-                </View>
-
-                <Text style={styles.projectName}>{project.name}</Text>
-                <Text style={styles.projectType}>{project.type}</Text>
-
-                {project.openTasks > 0 ? (
-                  <Text style={styles.openTasks}>
-                    {project.openTasks} {PROJECT_OPEN_TASKS_SUFFIX}
-                    {project.openTasks > 1 ? 's' : ''}
-                  </Text>
-                ) : null}
-
-                <View style={styles.cardFooter}>
-                  <View style={styles.avatarRow}>
-                    {project.memberInitials.map((initial, index) => (
-                      <View
-                        key={`${project.id}-${initial}-${index}`}
-                        style={[
-                          styles.avatar,
-                          { backgroundColor: project.memberColors[index] },
-                          index > 0 && styles.avatarOverlap,
-                        ]}>
-                        <Text style={styles.avatarText}>{initial}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  <Text style={styles.memberCount}>
-                    {project.members}{' '}
-                    {project.members === 1 ? PERSON_SUFFIX : PROJECT_PEOPLE_SUFFIX}
-                  </Text>
-                </View>
+          {loading ? (
+            <ActivityIndicator size="large" color={BLUE} style={styles.loader} />
+          ) : error ? (
+            <View style={styles.messageWrap}>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity onPress={onRefresh} activeOpacity={0.8}>
+                <Text style={styles.retryText}>Tap to retry</Text>
               </TouchableOpacity>
-            ))}
-          </View>
+            </View>
+          ) : filteredProjects.length === 0 ? (
+            <Text style={styles.emptyText}>No assigned projects found.</Text>
+          ) : (
+            <View style={styles.projectList}>
+              {filteredProjects.map(project => {
+                const team = Array.isArray(project.team) ? project.team : [];
+                const openTasks = openTaskCounts[project.id] || 0;
+
+                return (
+                  <TouchableOpacity
+                    key={project.id}
+                    style={styles.projectCard}
+                    onPress={() => openProject(project)}
+                    activeOpacity={0.85}>
+                    <View style={styles.cardTop}>
+                      <View style={styles.statusBadge}>
+                        <Text style={styles.statusText}>{project.status || 'In Progress'}</Text>
+                      </View>
+                      <Icon name="star" size={wp(4.5)} color={darkTextSecondaryColor} />
+                    </View>
+
+                    <Text style={styles.projectName}>{project.name}</Text>
+                    <Text style={styles.projectType}>{project.client}</Text>
+
+                    {openTasks > 0 ? (
+                      <Text style={styles.openTasks}>
+                        {openTasks} {PROJECT_OPEN_TASKS_SUFFIX}
+                        {openTasks > 1 ? 's' : ''}
+                      </Text>
+                    ) : null}
+
+                    <View style={styles.cardFooter}>
+                      <View style={styles.avatarRow}>
+                        {team.slice(0, 4).map((member, index) => {
+                          const memberLabel =
+                            getTeamMemberName(member, employeeNameMap) || 'Member';
+
+                          return (
+                          <View
+                            key={`${project.id}-${memberLabel}-${index}`}
+                            style={[
+                              styles.avatar,
+                              { backgroundColor: getMemberColor(index) },
+                              index > 0 && styles.avatarOverlap,
+                            ]}>
+                            <Text style={styles.avatarText}>{getMemberInitial(memberLabel)}</Text>
+                          </View>
+                          );
+                        })}
+                      </View>
+                      <Text style={styles.memberCount}>
+                        {team.length}{' '}
+                        {team.length === 1 ? PERSON_SUFFIX : PROJECT_PEOPLE_SUFFIX}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </ScrollView>
       </SafeAreaView>
       <AiAssistant />
@@ -217,6 +337,30 @@ const styles = StyleSheet.create({
     paddingVertical: hp(1.2),
     ...style.fontSizeNormal,
     color: darkTextPrimaryColor,
+  },
+  loader: {
+    marginTop: hp(4),
+  },
+  messageWrap: {
+    alignItems: 'center',
+    paddingVertical: hp(4),
+    gap: hp(1),
+  },
+  errorText: {
+    ...style.fontSizeNormal,
+    color: '#E85D5D',
+    textAlign: 'center',
+  },
+  retryText: {
+    ...style.fontSizeNormal,
+    color: BLUE,
+    ...style.fontWeightMedium,
+  },
+  emptyText: {
+    ...style.fontSizeNormal,
+    color: darkTextSecondaryColor,
+    textAlign: 'center',
+    paddingVertical: hp(4),
   },
   projectList: {
     gap: hp(1.5),

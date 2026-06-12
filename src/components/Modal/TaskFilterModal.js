@@ -21,7 +21,7 @@ import {
   TASK_FILTER_TODO,
   TASK_PRIORITY_LABEL,
   TASK_STATUS_LABEL,
-  TASK_STATUS_REVIEW,
+  TASK_STATUS_READY_FOR_TESTING,
 } from '../../constants/Constants';
 import {
   darkBorderColor,
@@ -43,15 +43,18 @@ const PRIORITY_OPTIONS = [
   'high',
 ];
 
-const STATUS_OPTIONS = [
+const ALL_STATUS_OPTIONS = [
   TASK_FILTER_ALL_STATUSES,
   TASK_FILTER_TODO,
   TASK_FILTER_IN_PROGRESS,
-  TASK_STATUS_REVIEW,
+  TASK_STATUS_READY_FOR_TESTING,
   TASK_FILTER_DONE,
 ];
 
-const TaskFilterModal = ({ visible, filters, onClose, onApply, onClear }) => {
+const TaskFilterModal = ({ visible, filters, hideDoneStatus = false, onClose, onApply, onClear }) => {
+  const statusOptions = hideDoneStatus
+    ? ALL_STATUS_OPTIONS.filter(option => option !== TASK_FILTER_DONE)
+    : ALL_STATUS_OPTIONS;
   const [search, setSearch] = useState('');
   const [priority, setPriority] = useState(TASK_FILTER_ALL_PRIORITIES);
   const [status, setStatus] = useState(TASK_FILTER_ALL_STATUSES);
@@ -112,7 +115,7 @@ const TaskFilterModal = ({ visible, filters, onClose, onApply, onClear }) => {
               <DropdownSelect
                 label={TASK_STATUS_LABEL}
                 value={status}
-                options={STATUS_OPTIONS}
+                options={statusOptions}
                 onChange={setStatus}
                 containerStyle={styles.dropdownField}
               />

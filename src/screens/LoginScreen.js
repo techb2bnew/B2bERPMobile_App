@@ -220,11 +220,11 @@ const LoginScreen = () => {
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>{NO_ACCOUNT_TEXT}</Text>
-            <TouchableOpacity
+            {/* <Text style={styles.footerText}>{NO_ACCOUNT_TEXT}</Text> */}
+            {/* <TouchableOpacity
               onPress={() => navigateWithRole(AUTH_ROUTES.CREATE_ACCOUNT)}>
               <Text style={styles.footerLink}>{SIGN_UP_LINK}</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
