@@ -38,6 +38,7 @@ import {
 } from '../../constants/Constants';
 import ChatMessageContent from '../../components/ChatMessageContent';
 import ChatAttachModal from '../../components/Modal/ChatAttachModal';
+import UserAvatar from '../../components/UserAvatar';
 import {
   darkBackgroundColor,
   darkBorderColor,
@@ -69,6 +70,18 @@ const HORIZONTAL_PAD = wp(3.5);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isUuid = value => UUID_PATTERN.test(String(value || ''));
+
+const MESSAGE_AVATAR_SIZE = wp(8);
+
+const ChatMessageAvatar = ({ message, backgroundColor }) => (
+  <UserAvatar
+    userId={message.senderId}
+    name={message.name}
+    size={MESSAGE_AVATAR_SIZE}
+    backgroundColor={backgroundColor || message.color}
+    textStyle={styles.avatarText}
+  />
+);
 
 const shouldShowAvatar = (list, index, currentUserId) => {
   const item = list[index];
@@ -440,9 +453,7 @@ const ChannelChatScreen = () => {
       return (
         <View key={item.id} style={[styles.broadcastRow, { marginTop }]}>
           <View style={styles.broadcastHeader}>
-            <View style={[styles.avatarSmall, { backgroundColor: item.color }]}>
-              <Text style={styles.avatarText}>{item.initial}</Text>
-            </View>
+            <ChatMessageAvatar message={item} />
             <Text style={styles.broadcastName}>{item.name}</Text>
             <View style={styles.broadcastBadge}>
               <Text style={styles.broadcastBadgeText}>{CHAT_BROADCAST_LABEL}</Text>
@@ -470,9 +481,7 @@ const ChannelChatScreen = () => {
     return (
       <View key={item.id} style={[styles.otherRow, { marginTop }]}>
         {showAvatar ? (
-          <View style={[styles.avatarSmall, { backgroundColor: item.color }]}>
-            <Text style={styles.avatarText}>{item.initial}</Text>
-          </View>
+          <ChatMessageAvatar message={item} />
         ) : (
           <View style={styles.avatarSpacer} />
         )}
@@ -526,6 +535,10 @@ const ChannelChatScreen = () => {
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Icon name="chevron-left" size={wp(6)} color={darkTextPrimaryColor} />
         </TouchableOpacity>
+
+        {isDirect && peerId ? (
+          <UserAvatar userId={peerId} name={resolvedChatName} size={wp(9)} />
+        ) : null}
 
         <View style={styles.headerCenter}>
           <Text style={styles.channelTitle} numberOfLines={1}>

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Dimensions,
@@ -25,6 +25,8 @@ import {
   LOGOUT_CONFIRM_MESSAGE,
   LOGOUT_CONFIRM_TITLE,
   LOGOUT_TEXT,
+  PROFILE_TITLE,
+  PROFILE_VIEW,
   MY_DASHBOARD_LABEL,
   PROJECTS_WORK_LABEL,
   ONLINE_STATUS,
@@ -44,6 +46,12 @@ import {
   heightPercentageToDP as hp,
   widthPercentageToDP as wp,
 } from '../utils';
+import {
+  fetchTotalUnreadChatCount,
+  subscribeToUserChatInbox,
+} from '../services/chatService';
+import UserAvatar from './UserAvatar';
+import { refreshEmployeeProfileImage } from '../hooks/useEmployeeProfileImage';
 
 const PURPLE = '#9B59B6';
 const SLIDE_DURATION = 260;
@@ -56,6 +64,7 @@ const MENU_ITEMS = [
   { route: MAIN_ROUTES.PROJECTS_WORK, label: PROJECTS_WORK_LABEL, icon: 'folder' },
   { route: MAIN_ROUTES.TIME_SHEET, label: TIME_SHEET_LABEL, icon: 'clock' },
   { route: MAIN_ROUTES.CHAT, label: CHAT_LABEL, icon: 'message-circle' },
+  { route: MAIN_ROUTES.PROFILE, label: PROFILE_TITLE, icon: 'user' },
 ];
 
 const CustomDrawer = () => {
@@ -69,9 +78,46 @@ const CustomDrawer = () => {
   const [isRendered, setIsRendered] = useState(false);
   const [profileExpanded, setProfileExpanded] = useState(false);
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
   const pendingLogoutConfirmRef = useRef(false);
 
-  const initial = (user?.name || 'U').charAt(0).toUpperCase();
+  const loadChatUnreadCount = useCallback(async () => {
+    if (!user?.id) {
+      setChatUnreadCount(0);
+      return;
+    }
+
+    try {
+      const count = await fetchTotalUnreadChatCount(user.id);
+      setChatUnreadCount(count);
+    } catch {
+      // Keep the last known count if refresh fails.
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadChatUnreadCount();
+
+    if (!user?.id) {
+      return undefined;
+    }
+
+    const unsubscribe = subscribeToUserChatInbox(user.id, loadChatUnreadCount);
+    return unsubscribe;
+  }, [user?.id, loadChatUnreadCount]);
+
+  useEffect(() => {
+    if (isOpen) {
+      loadChatUnreadCount();
+      if (user?.id) {
+        refreshEmployeeProfileImage(user.id);
+      }
+    }
+  }, [isOpen, loadChatUnreadCount, user?.id]);
+
+  const chatBadgeLabel =
+    chatUnreadCount > 0 ? (chatUnreadCount > 99 ? '99+' : String(chatUnreadCount)) : null;
+
   const displayName = capitalizeName(user?.name || 'User');
   const displayRole = user?.selectedRoleTitle || user?.role || 'Employee';
 
@@ -136,6 +182,12 @@ const CustomDrawer = () => {
     navigation.navigate(screen);
   };
 
+  const openProfile = () => {
+    setProfileExpanded(false);
+    closeDrawer();
+    navigation.navigate(MAIN_ROUTES.PROFILE);
+  };
+
   const toggleProfileMenu = () => {
     setProfileExpanded(prev => !prev);
   };
@@ -188,6 +240,9 @@ const CustomDrawer = () => {
             <View style={styles.menuSection}>
               {MENU_ITEMS.map(item => {
                 const isActive = activeRoute === item.route;
+                const badge =
+                  item.route === MAIN_ROUTES.CHAT ? chatBadgeLabel : item.badge || null;
+
                 return (
                   <TouchableOpacity
                     key={item.route}
@@ -203,9 +258,9 @@ const CustomDrawer = () => {
                       style={[styles.menuLabel, isActive && styles.menuLabelActive]}>
                       {item.label}
                     </Text>
-                    {item.badge ? (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{item.badge}</Text>
+                    {badge ? (
+                      <View style={[styles.badge, isActive && styles.badgeActive]}>
+                        <Text style={styles.badgeText}>{badge}</Text>
                       </View>
                     ) : null}
                   </TouchableOpacity>
@@ -220,13 +275,23 @@ const CustomDrawer = () => {
                 <Text style={styles.dropdownName}>{displayName}</Text>
                 <Text style={styles.dropdownRole}>{displayRole}</Text>
                 <View style={styles.dropdownDivider} />
-                <TouchableOpacity
-                  style={styles.logoutRow}
-                  onPress={handleLogoutPress}
-                  activeOpacity={0.8}>
-                  <Icon name="log-out" size={wp(4.5)} color="#F85149" />
-                  <Text style={styles.logoutText}>{LOGOUT_TEXT}</Text>
-                </TouchableOpacity>
+                <View style={styles.profileActionsSection}>
+                  <TouchableOpacity
+                    style={styles.profileActionRow}
+                    onPress={openProfile}
+                    activeOpacity={0.8}>
+                    <Icon name="user" size={wp(4.5)} color={darkTextPrimaryColor} />
+                    <Text style={styles.profileActionText}>{PROFILE_VIEW}</Text>
+                  </TouchableOpacity>
+                  <View style={styles.profileActionDivider} />
+                  <TouchableOpacity
+                    style={styles.logoutRow}
+                    onPress={handleLogoutPress}
+                    activeOpacity={0.8}>
+                    <Icon name="log-out" size={wp(4.5)} color="#F85149" />
+                    <Text style={styles.logoutText}>{LOGOUT_TEXT}</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             ) : null}
 
@@ -234,9 +299,7 @@ const CustomDrawer = () => {
               style={styles.userRow}
               onPress={toggleProfileMenu}
               activeOpacity={0.85}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{initial}</Text>
-              </View>
+              <UserAvatar name={user?.name} size={wp(11)} />
               <View style={styles.userInfo}>
                 <Text style={styles.userName}>{displayName}</Text>
                 <View style={styles.onlineRow}>
@@ -342,13 +405,16 @@ const styles = StyleSheet.create({
     ...style.fontWeightMedium,
   },
   badge: {
-    backgroundColor: 'rgba(155, 89, 182, 0.35)',
+    backgroundColor: PURPLE,
     borderRadius: wp(3),
     minWidth: wp(5.5),
     height: wp(5.5),
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacings.xsmall,
+  },
+  badgeActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.28)',
   },
   badgeText: {
     ...style.fontSizeSmall,
@@ -367,7 +433,7 @@ const styles = StyleSheet.create({
     borderColor: darkBorderColor,
     paddingHorizontal: wp(4.5),
     paddingTop: hp(2),
-    paddingBottom: hp(1.6),
+    paddingBottom: hp(2),
   },
   dropdownName: {
     ...style.fontSizeNormal2x,
@@ -382,13 +448,35 @@ const styles = StyleSheet.create({
   dropdownDivider: {
     height: 1,
     backgroundColor: darkBorderColor,
-    marginVertical: hp(1.5),
+    marginTop: hp(1.5),
+    marginBottom: hp(1),
+  },
+  profileActionsSection: {
+    gap: hp(0.6),
+  },
+  profileActionDivider: {
+    height: 1,
+    backgroundColor: darkBorderColor,
+    marginVertical: hp(0.4),
+  },
+  profileActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(3),
+    paddingVertical: hp(1.1),
+    minHeight: hp(5.2),
+  },
+  profileActionText: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium,
+    color: darkTextPrimaryColor,
   },
   logoutRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: wp(3),
-    paddingVertical: hp(0.4),
+    paddingVertical: hp(1.1),
+    minHeight: hp(5.2),
   },
   logoutText: {
     ...style.fontSizeNormal,
@@ -405,19 +493,6 @@ const styles = StyleSheet.create({
     borderColor: darkBorderColor,
     paddingHorizontal: wp(4),
     paddingVertical: hp(1.6),
-  },
-  avatar: {
-    width: wp(11),
-    height: wp(11),
-    borderRadius: wp(5.5),
-    backgroundColor: PURPLE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    ...style.fontSizeNormal,
-    ...style.fontWeightMedium1x,
-    color: darkTextPrimaryColor,
   },
   userInfo: {
     flex: 1,

@@ -215,6 +215,13 @@ export const CHAT_UPLOADING_MEDIA = 'Uploading...';
 export const NOTIFICATIONS_TITLE = 'Notifications';
 export const NOTIFICATIONS_SUBTITLE = '3 unread · 8 total';
 export const MARK_ALL_READ = 'Mark all as read';
+export const PROFILE_TITLE = 'My Profile';
+export const PROFILE_VIEW = 'View Profile';
+export const PROFILE_JOINED_LABEL = 'Joined';
+export const PROFILE_ACCESS_ROLE_LABEL = 'Access Role';
+export const PROFILE_LOAD_ERROR = 'Unable to load profile. Please try again.';
+export const PROFILE_NOT_AVAILABLE = 'Not available';
+
 export const ONLINE_STATUS = 'Online';
 
 export const DASHBOARD_LIVE_PREFIX = "'s dashboard · live from ";

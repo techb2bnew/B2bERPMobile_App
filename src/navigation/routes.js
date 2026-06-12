@@ -14,4 +14,5 @@ export const MAIN_ROUTES = {
   TIME_SHEET: 'TimeSheet',
   CHAT: 'Chat',
   CHANNEL_CHAT: 'ChannelChat',
+  PROFILE: 'Profile',
 };

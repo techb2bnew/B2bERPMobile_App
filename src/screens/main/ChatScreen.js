@@ -12,6 +12,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import AiAssistant from '../../components/AiAssistant';
 import AppHeader from '../../components/AppHeader';
+import UserAvatar from '../../components/UserAvatar';
 import NewChatFab from '../../components/NewChatFab';
 import NewChatTypeModal from '../../components/Modal/NewChatTypeModal';
 import StartChatModal from '../../components/Modal/StartChatModal';
@@ -187,6 +188,11 @@ const ChatScreen = () => {
   const hasSearchQuery = Boolean(searchQuery.trim());
   const hasThreads = threads.length > 0;
 
+  const totalUnreadCount = useMemo(
+    () => threads.reduce((sum, thread) => sum + (thread.unreadCount || 0), 0),
+    [threads],
+  );
+
   const openTypePicker = () => setTypePickerVisible(true);
   const closeTypePicker = () => setTypePickerVisible(false);
 
@@ -248,15 +254,23 @@ const ChatScreen = () => {
     return thread.chatType === 'group' ? `# ${displayName}` : displayName;
   };
 
-  const renderThreadIcon = thread => {
+  const renderThreadAvatar = thread => {
     if (thread.chatType === 'group') {
-      return <Icon name="users" size={wp(4.8)} color={PURPLE} />;
+      return (
+        <View style={[styles.threadAvatar, styles.threadAvatarGroup]}>
+          <Icon name="users" size={wp(4.8)} color={PURPLE} />
+        </View>
+      );
     }
 
     return (
-      <Text style={styles.threadInitial}>
-        {(capitalizeName(thread.chatName) || 'U').charAt(0).toUpperCase()}
-      </Text>
+      <UserAvatar
+        userId={thread.peerId}
+        name={thread.chatName}
+        size={wp(12)}
+        backgroundColor={getThreadAvatarColor(thread)}
+        textStyle={styles.threadInitial}
+      />
     );
   };
 
@@ -323,6 +337,9 @@ const ChatScreen = () => {
                   </ScrollView>
                   <Text style={styles.filterCountText}>
                     {filteredThreads.length} chat{filteredThreads.length === 1 ? '' : 's'}
+                    {totalUnreadCount > 0
+                      ? ` · ${totalUnreadCount} unread`
+                      : ''}
                   </Text>
                 </View>
               </View>
@@ -338,43 +355,55 @@ const ChatScreen = () => {
                 <View style={styles.threadList}>
                   {filteredThreads.map(thread => {
                     const timeLabel = formatThreadTime(thread.updatedAt);
-                    const isGroup = thread.chatType === 'group';
+                    const unreadCount = thread.unreadCount || 0;
+                    const hasUnread = unreadCount > 0;
+                    const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount);
 
                     return (
                       <TouchableOpacity
                         key={thread.channelId || thread.chatId}
-                        style={styles.threadCard}
+                        style={[styles.threadCard, hasUnread && styles.threadCardUnread]}
                         onPress={() => openChat(thread)}
                         activeOpacity={0.82}>
-                        <View
-                          style={[
-                            styles.threadAvatar,
-                            {
-                              backgroundColor: isGroup
-                                ? 'rgba(155, 89, 182, 0.18)'
-                                : getThreadAvatarColor(thread),
-                            },
-                          ]}>
-                          {renderThreadIcon(thread)}
+                        <View style={styles.threadAvatarWrap}>
+                          {renderThreadAvatar(thread)}
+                          {hasUnread ? <View style={styles.avatarUnreadDot} /> : null}
                         </View>
                         <View style={styles.threadBody}>
                           <View style={styles.threadTopRow}>
-                            <Text style={styles.threadTitle} numberOfLines={1}>
+                            <Text
+                              style={[styles.threadTitle, hasUnread && styles.threadTitleUnread]}
+                              numberOfLines={1}>
                               {renderThreadTitle(thread)}
                             </Text>
                             {timeLabel ? (
-                              <Text style={styles.threadTime}>{timeLabel}</Text>
+                              <Text
+                                style={[styles.threadTime, hasUnread && styles.threadTimeUnread]}>
+                                {timeLabel}
+                              </Text>
                             ) : null}
                           </View>
-                          <Text style={styles.threadSubtitle} numberOfLines={1}>
+                          <Text
+                            style={[
+                              styles.threadSubtitle,
+                              hasUnread && styles.threadSubtitleUnread,
+                            ]}
+                            numberOfLines={1}>
                             {renderThreadSubtitle(thread)}
                           </Text>
                         </View>
-                        <Icon
-                          name="chevron-right"
-                          size={wp(4.5)}
-                          color="rgba(255,255,255,0.28)"
-                        />
+                        <View style={styles.threadTrailing}>
+                          {hasUnread ? (
+                            <View style={styles.unreadBadge}>
+                              <Text style={styles.unreadBadgeText}>{unreadLabel}</Text>
+                            </View>
+                          ) : null}
+                          <Icon
+                            name="chevron-right"
+                            size={wp(4.5)}
+                            color="rgba(255,255,255,0.28)"
+                          />
+                        </View>
                       </TouchableOpacity>
                     );
                   })}
@@ -526,12 +555,33 @@ const styles = StyleSheet.create({
     paddingVertical: hp(1.35),
     gap: wp(3),
   },
+  threadCardUnread: {
+    borderColor: 'rgba(155, 89, 182, 0.35)',
+    backgroundColor: 'rgba(155, 89, 182, 0.06)',
+  },
+  threadAvatarWrap: {
+    position: 'relative',
+  },
+  avatarUnreadDot: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: wp(2.8),
+    height: wp(2.8),
+    borderRadius: wp(1.4),
+    backgroundColor: PURPLE,
+    borderWidth: 2,
+    borderColor: darkSurfaceColor,
+  },
   threadAvatar: {
     width: wp(12),
     height: wp(12),
     borderRadius: wp(6),
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  threadAvatarGroup: {
+    backgroundColor: 'rgba(155, 89, 182, 0.18)',
   },
   threadInitial: {
     ...style.fontSizeNormal,
@@ -555,13 +605,45 @@ const styles = StyleSheet.create({
     ...style.fontWeightMedium1x,
     color: darkTextPrimaryColor,
   },
+  threadTitleUnread: {
+    color: darkTextPrimaryColor,
+    ...style.fontWeightMedium1x,
+  },
   threadTime: {
     ...style.fontSizeSmall,
     color: darkTextSecondaryColor,
   },
+  threadTimeUnread: {
+    color: PURPLE,
+    ...style.fontWeightMedium,
+  },
   threadSubtitle: {
     ...style.fontSizeSmall2x,
     color: darkTextSecondaryColor,
+  },
+  threadSubtitleUnread: {
+    color: darkTextPrimaryColor,
+    ...style.fontWeightMedium,
+  },
+  threadTrailing: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: hp(0.5),
+    minWidth: wp(8),
+  },
+  unreadBadge: {
+    minWidth: wp(5.5),
+    height: wp(5.5),
+    borderRadius: wp(2.75),
+    paddingHorizontal: wp(1.5),
+    backgroundColor: PURPLE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadBadgeText: {
+    ...style.fontSizeSmall,
+    color: darkTextPrimaryColor,
+    ...style.fontWeightMedium1x,
   },
   emptyCard: {
     alignItems: 'center',

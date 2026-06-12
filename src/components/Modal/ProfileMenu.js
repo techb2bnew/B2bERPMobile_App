@@ -9,7 +9,9 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
+import { MAIN_ROUTES } from '../../navigation/routes';
 import ConfirmModal from './ConfirmModal';
 import {
   LOGOUT_CANCEL,
@@ -17,6 +19,7 @@ import {
   LOGOUT_CONFIRM_MESSAGE,
   LOGOUT_CONFIRM_TITLE,
   LOGOUT_TEXT,
+  PROFILE_VIEW,
 } from '../../constants/Constants';
 import {
   darkBorderColor,
@@ -32,8 +35,14 @@ import {
 } from '../../utils';
 
 const ProfileMenu = ({ visible, onClose }) => {
+  const navigation = useNavigation();
   const { user, logout } = useAuth();
   const [logoutConfirmVisible, setLogoutConfirmVisible] = useState(false);
+
+  const handleViewProfile = () => {
+    onClose();
+    navigation.navigate(MAIN_ROUTES.PROFILE);
+  };
 
   const handleLogoutPress = () => {
     onClose();
@@ -67,10 +76,23 @@ const ProfileMenu = ({ visible, onClose }) => {
                   {user?.selectedRoleTitle || user?.role || 'Employee'}
                 </Text>
                 <View style={styles.divider} />
-                <TouchableOpacity style={styles.logoutRow} onPress={handleLogoutPress}>
-                  <Icon name="log-out" size={wp(4.5)} color="#F85149" />
-                  <Text style={styles.logoutText}>{LOGOUT_TEXT}</Text>
-                </TouchableOpacity>
+                <View style={styles.actionsSection}>
+                  <TouchableOpacity
+                    style={styles.menuRow}
+                    onPress={handleViewProfile}
+                    activeOpacity={0.8}>
+                    <Icon name="user" size={wp(4.5)} color={darkTextPrimaryColor} />
+                    <Text style={styles.menuRowText}>{PROFILE_VIEW}</Text>
+                  </TouchableOpacity>
+                  <View style={styles.actionDivider} />
+                  <TouchableOpacity
+                    style={styles.logoutRow}
+                    onPress={handleLogoutPress}
+                    activeOpacity={0.8}>
+                    <Icon name="log-out" size={wp(4.5)} color="#F85149" />
+                    <Text style={styles.logoutText}>{LOGOUT_TEXT}</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -122,13 +144,35 @@ const styles = StyleSheet.create({
   divider: {
     height: 1,
     backgroundColor: darkBorderColor,
-    marginVertical: spacings.normal,
+    marginTop: spacings.normal,
+    marginBottom: spacings.small,
+  },
+  actionsSection: {
+    gap: spacings.small,
+  },
+  actionDivider: {
+    height: 1,
+    backgroundColor: darkBorderColor,
+    marginVertical: spacings.xsmall,
+  },
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacings.normal,
+    paddingVertical: spacings.normal,
+    minHeight: wp(11),
+  },
+  menuRowText: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium,
+    color: darkTextPrimaryColor,
   },
   logoutRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacings.normal,
-    paddingVertical: spacings.xsmall,
+    paddingVertical: spacings.normal,
+    minHeight: wp(11),
   },
   logoutText: {
     ...style.fontSizeNormal,

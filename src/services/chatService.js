@@ -4,6 +4,7 @@ import {
   isSupabaseConfigured,
   syncSupabaseRealtimeAuth,
 } from '../lib/supabase';
+import { getEmployeeProfileImageUrl } from './employeeService';
 import { getLastMessagePreview } from './chatMediaService';
 import { capitalizeName } from '../utils';
 
@@ -81,7 +82,7 @@ const fetchProfilesByIds = async ids => {
 
   const { data, error } = await getSupabase()
     .from(PROFILES_TABLE)
-    .select('id, name, email')
+    .select('id, name, email, profile_image_url, avatar')
     .in('id', uniqueIds);
 
   if (error) {
@@ -146,6 +147,7 @@ export const mapMessageRow = (row, profileMap = {}) => {
     name: senderName,
     initial: getInitials(senderName),
     color: getAvatarColor(row.sender_id),
+    avatarUrl: getEmployeeProfileImageUrl(sender),
     time: formatMessageTime(row.created_at),
     text: row.content || '',
     messageType: row.message_type || 'text',
@@ -160,7 +162,7 @@ export const mapMessageRow = (row, profileMap = {}) => {
 
 export const mapChannelToThread = (
   channel,
-  { peerId, membersCount, lastMessage, lastMessageAt, profileMap = {} },
+  { peerId, membersCount, lastMessage, lastMessageAt, unreadCount = 0, profileMap = {} },
 ) => {
   const isDirect = isDirectChannelType(channel.channel_type);
   let chatName = capitalizeName(channel.name);
@@ -179,6 +181,7 @@ export const mapChannelToThread = (
     members: membersCount || 0,
     updatedAt: lastMessageAt || channel.created_at,
     lastMessage: lastMessage || '',
+    unreadCount: Number(unreadCount) || 0,
   };
 };
 
@@ -329,6 +332,57 @@ const fetchLastMessages = async channelIds => {
   return map;
 };
 
+const fetchChannelReadsForUser = async (channelIds, userId) => {
+  if (channelIds.length === 0) {
+    return {};
+  }
+
+  const { data, error } = await getSupabase()
+    .from(READS_TABLE)
+    .select('channel_id, last_read_at')
+    .eq('user_id', userId)
+    .in('channel_id', channelIds);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).reduce((map, row) => {
+    map[row.channel_id] = row.last_read_at;
+    return map;
+  }, {});
+};
+
+const fetchUnreadCountsForChannels = async (channelIds, userId, readsMap) => {
+  if (channelIds.length === 0) {
+    return {};
+  }
+
+  const { data, error } = await getSupabase()
+    .from(MESSAGES_TABLE)
+    .select('channel_id, created_at')
+    .in('channel_id', channelIds)
+    .neq('sender_id', userId);
+
+  if (error) {
+    throw error;
+  }
+
+  const counts = Object.fromEntries(channelIds.map(id => [id, 0]));
+
+  (data || []).forEach(row => {
+    const lastReadAt = readsMap[row.channel_id];
+    const readMs = lastReadAt ? new Date(lastReadAt).getTime() : 0;
+    const messageMs = new Date(row.created_at).getTime();
+
+    if (!Number.isNaN(messageMs) && messageMs > readMs) {
+      counts[row.channel_id] += 1;
+    }
+  });
+
+  return counts;
+};
+
 const fetchPeerIdsForDirectChannels = async (channelIds, userId) => {
   if (channelIds.length === 0) {
     return {};
@@ -383,11 +437,14 @@ export const fetchUserChatThreads = async userId => {
     .filter(channel => isDirectChannelType(channel.channel_type))
     .map(channel => channel.id);
 
-  const [memberCounts, lastMessages, peerMap] = await Promise.all([
+  const [memberCounts, lastMessages, peerMap, readsMap] = await Promise.all([
     fetchMemberCounts(channelIds),
     fetchLastMessages(channelIds),
     fetchPeerIdsForDirectChannels(directChannelIds, userId),
+    fetchChannelReadsForUser(channelIds, userId),
   ]);
+
+  const unreadCounts = await fetchUnreadCountsForChannels(channelIds, userId, readsMap);
 
   const peerIds = Object.values(peerMap);
   const profileMap = await fetchProfilesByIds(peerIds);
@@ -399,6 +456,7 @@ export const fetchUserChatThreads = async userId => {
       membersCount: memberCounts[channel.id] || 0,
       lastMessage: lastMessageRow?.content || '',
       lastMessageAt: lastMessageRow?.createdAt,
+      unreadCount: unreadCounts[channel.id] || 0,
       profileMap,
     });
   });
@@ -406,6 +464,31 @@ export const fetchUserChatThreads = async userId => {
   return threads.sort(
     (a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime(),
   );
+};
+
+export const fetchTotalUnreadChatCount = async userId => {
+  if (!isSupabaseConfigured || !userId) {
+    return 0;
+  }
+
+  const { data: memberships, error: memberError } = await getSupabase()
+    .from(MEMBERS_TABLE)
+    .select('channel_id')
+    .eq('user_id', userId);
+
+  if (memberError) {
+    throw memberError;
+  }
+
+  const channelIds = [...new Set((memberships || []).map(row => row.channel_id))];
+  if (channelIds.length === 0) {
+    return 0;
+  }
+
+  const readsMap = await fetchChannelReadsForUser(channelIds, userId);
+  const unreadCounts = await fetchUnreadCountsForChannels(channelIds, userId, readsMap);
+
+  return Object.values(unreadCounts).reduce((sum, count) => sum + count, 0);
 };
 
 export const fetchChannelMessages = async channelId => {
@@ -616,6 +699,12 @@ export const subscribeToUserChatInbox = (userId, onChange) => {
     subscribeToTable({
       channelPrefix: `chat-inbox-messages-${userId}`,
       table: MESSAGES_TABLE,
+      onChange: notify,
+    }),
+    subscribeToTable({
+      channelPrefix: `chat-inbox-reads-${userId}`,
+      table: READS_TABLE,
+      filter: `user_id=eq.${userId}`,
       onChange: notify,
     }),
     subscribeToUserChannels(userId, notify),

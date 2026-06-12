@@ -103,6 +103,14 @@ export const fetchAllEmployeeProfiles = async () => {
   return data || [];
 };
 
+export const getEmployeeProfileImageUrl = profile => {
+  const candidates = [profile?.profile_image_url, profile?.avatar];
+
+  const url = candidates.find(value => typeof value === 'string' && value.trim().length > 0);
+
+  return url ? url.trim() : null;
+};
+
 export const getEmployeeProfileById = async id => {
   if (!isSupabaseConfigured || !id) {
     return null;
@@ -110,7 +118,7 @@ export const getEmployeeProfileById = async id => {
 
   const { data, error } = await getSupabase()
     .from(EMPLOYEE_PROFILES_TABLE)
-    .select('id, name, email, phone')
+    .select('id, name, email, phone, role, dept, profile_image_url, avatar')
     .eq('id', id)
     .maybeSingle();
 

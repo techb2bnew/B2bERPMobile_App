@@ -12,6 +12,7 @@ import ProjectsWorkScreen from '../screens/main/ProjectsWorkScreen';
 import TaskManagementScreen from '../screens/main/TaskManagementScreen';
 import NotificationsScreen from '../screens/main/NotificationsScreen';
 import TimeSheetScreen from '../screens/main/TimeSheetScreen';
+import ProfileScreen from '../screens/main/ProfileScreen';
 import { MAIN_ROUTES } from './routes';
 
 const Stack = createNativeStackNavigator();
@@ -67,6 +68,11 @@ const MainStackNavigator = () => {
           name={MAIN_ROUTES.CHANNEL_CHAT}
           component={ChannelChatScreen}
           listeners={focusListener(MAIN_ROUTES.CHAT, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.PROFILE}
+          component={ProfileScreen}
+          listeners={focusListener(MAIN_ROUTES.PROFILE, setActiveRoute)}
         />
       </Stack.Navigator>
       <CustomDrawer />

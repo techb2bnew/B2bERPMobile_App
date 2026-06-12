@@ -11,15 +11,12 @@ import {
 import { style, spacings } from '../constants/Fonts';
 import { widthPercentageToDP as wp, heightPercentageToDP as hp } from '../utils';
 import ProfileMenu from './Modal/ProfileMenu';
-
-const PURPLE = '#9B59B6';
+import UserAvatar from './UserAvatar';
 
 const AppHeader = ({ title, actionIcon, onActionPress, actionAccessibilityLabel }) => {
   const { user } = useAuth();
   const { openDrawer } = useDrawer();
   const [profileMenuVisible, setProfileMenuVisible] = useState(false);
-
-  const initial = (user?.name || 'U').charAt(0).toUpperCase();
 
   return (
     <View style={styles.container}>
@@ -60,10 +57,8 @@ const AppHeader = ({ title, actionIcon, onActionPress, actionAccessibilityLabel 
 
         <View style={styles.headerDivider} />
 
-        <TouchableOpacity
-          style={styles.avatar}
-          onPress={() => setProfileMenuVisible(true)}>
-          <Text style={styles.avatarText}>{initial}</Text>
+        <TouchableOpacity onPress={() => setProfileMenuVisible(true)} activeOpacity={0.8}>
+          <UserAvatar name={user?.name} size={wp(8.5)} />
         </TouchableOpacity>
       </View>
 
@@ -138,18 +133,5 @@ const styles = StyleSheet.create({
     height: wp(2),
     borderRadius: wp(1),
     backgroundColor: '#F85149',
-  },
-  avatar: {
-    width: wp(8.5),
-    height: wp(8.5),
-    borderRadius: wp(4.25),
-    backgroundColor: PURPLE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    ...style.fontSizeNormal,
-    ...style.fontWeightMedium1x,
-    color: darkTextPrimaryColor,
   },
 });
