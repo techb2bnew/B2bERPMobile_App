@@ -59,7 +59,7 @@ import {
   subscribeToChannelMessages,
 } from '../../services/chatService';
 import { getEmployeeProfileById } from '../../services/employeeService';
-import { uploadChatMedia } from '../../services/chatMediaService';
+import { resolveMessageTypeForContent, uploadChatMedia } from '../../services/chatMediaService';
 import { capitalizeName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const PURPLE = '#9B59B6';
@@ -469,10 +469,10 @@ const ChannelChatScreen = () => {
       return (
         <View key={item.id} style={[styles.ownRow, { marginTop }]}>
           <View style={[styles.ownBubble, !clusterStart && styles.ownBubbleStacked]}>
-            <View style={styles.bubbleInner}>
-              <ChatMessageContent message={item} isOwn />
-              <Text style={styles.ownTime}>{item.time}</Text>
-            </View>
+          <View style={styles.bubbleInner}>
+            <ChatMessageContent message={item} isOwn />
+            <Text style={styles.ownTime}>{item.time}</Text>
+          </View>
           </View>
         </View>
       );
@@ -516,6 +516,7 @@ const ChannelChatScreen = () => {
         senderId: user.id,
         senderName: user.name,
         content: trimmed,
+        messageType: resolveMessageTypeForContent(trimmed),
       });
       setMessage('');
       appendMessage(newMessage);

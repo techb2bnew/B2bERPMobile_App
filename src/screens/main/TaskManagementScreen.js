@@ -335,7 +335,10 @@ const TaskManagementScreen = () => {
 
       setSaving(true);
       try {
-        await updateProjectTaskStatus(taskId, newStatus);
+        await updateProjectTaskStatus(taskId, newStatus, {
+          movedBy: defaultAssigneeId,
+          projectId,
+        });
       } catch (error) {
         setTasks(previousTasks);
         Alert.alert('Update Failed', error?.message || 'Unable to update task status.');
@@ -509,7 +512,7 @@ const TaskManagementScreen = () => {
     setSaving(true);
     try {
       if (isCreate) {
-        const createMeta = { projectId, assigneeId: defaultAssigneeId };
+        const createMeta = { projectId, assigneeId: defaultAssigneeId, movedBy: defaultAssigneeId };
         console.log('[TaskSave] calling createProjectTask', { payload, createMeta });
         const createdRow = await createProjectTask(payload, createMeta);
         console.log('[TaskSave] createProjectTask success', createdRow);
@@ -521,7 +524,10 @@ const TaskManagementScreen = () => {
         taskId: payload.id,
         payload,
       });
-      const updatedRow = await updateProjectTask(payload.id, payload);
+      const updatedRow = await updateProjectTask(payload.id, payload, {
+        movedBy: defaultAssigneeId,
+        projectId,
+      });
       console.log('[TaskSave] updateProjectTask success', updatedRow);
       setTasks(prev =>
         prev.map(task =>

@@ -12,35 +12,44 @@ import Icon from 'react-native-vector-icons/Feather';
 import { CHAT_TAP_TO_OPEN_FILE, CHAT_TAP_TO_PLAY_VIDEO } from '../constants/Constants';
 import { darkTextPrimaryColor, darkTextSecondaryColor } from '../constants/Color';
 import { style } from '../constants/Fonts';
-import { formatFileSize, getMessageKind } from '../services/chatMediaService';
+import {
+  formatFileSize,
+  getMessageKind,
+  normalizeUrlForOpen,
+  splitTextWithLinks,
+} from '../services/chatMediaService';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../utils';
 
 const PURPLE = '#9B59B6';
 
 const openExternalUrl = async url => {
+  const normalized = normalizeUrlForOpen(url);
+  if (!normalized) {
+    return;
+  }
+
   try {
-    const canOpen = await Linking.canOpenURL(url);
-    if (!canOpen) {
-      throw new Error('Cannot open');
-    }
-    await Linking.openURL(url);
+    await Linking.openURL(normalized);
   } catch {
     // caller may show alert
   }
 };
 
 const LinkText = ({ text, isOwn }) => {
-  const parts = String(text || '').split(/(https?:\/\/[^\s]+)/g);
+  const parts = splitTextWithLinks(text);
 
   return (
     <Text style={[styles.text, isOwn && styles.ownText]}>
       {parts.map((part, index) =>
-        /^https?:\/\//.test(part) ? (
-          <Text key={`${part}-${index}`} style={styles.link} onPress={() => openExternalUrl(part)}>
-            {part}
+        part.type === 'link' ? (
+          <Text
+            key={`${part.value}-${index}`}
+            style={[styles.link, isOwn && styles.ownLink]}
+            onPress={() => openExternalUrl(part.value)}>
+            {part.value}
           </Text>
         ) : (
-          <Text key={`${part}-${index}`}>{part}</Text>
+          <Text key={`${part.value}-${index}`}>{part.value}</Text>
         ),
       )}
     </Text>
@@ -114,13 +123,20 @@ const ChatMessageContent = ({ message, isOwn }) => {
   }
 
   if (kind === 'link') {
+    const linkLabel = String(message.text || '').trim();
+
     return (
-      <TouchableOpacity activeOpacity={0.85} onPress={() => openExternalUrl(message.text)}>
-        <View style={styles.linkCard}>
-          <Icon name="link" size={wp(4.5)} color={isOwn ? '#E8D4F2' : PURPLE} />
-          <Text style={[styles.linkText, isOwn && styles.ownText]} numberOfLines={3}>
-            {message.text}
-          </Text>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => openExternalUrl(linkLabel)}>
+        <View style={styles.linkRow}>
+          <Icon
+            name="link"
+            size={wp(4.2)}
+            color={isOwn ? '#B8DEFF' : '#8EC5FF'}
+            style={styles.linkIcon}
+          />
+          <Text style={[styles.linkOnlyText, isOwn && styles.ownLinkText]}>{linkLabel}</Text>
         </View>
       </TouchableOpacity>
     );
@@ -144,6 +160,9 @@ const styles = StyleSheet.create({
   link: {
     color: '#8EC5FF',
     textDecorationLine: 'underline',
+  },
+  ownLink: {
+    color: '#B8DEFF',
   },
   mediaWrap: {
     borderRadius: wp(2.5),
@@ -210,16 +229,22 @@ const styles = StyleSheet.create({
   ownHint: {
     color: 'rgba(255,255,255,0.65)',
   },
-  linkCard: {
+  linkRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: wp(2),
-    maxWidth: wp(58),
+    gap: wp(1.5),
   },
-  linkText: {
+  linkIcon: {
+    marginTop: hp(0.15),
+  },
+  linkOnlyText: {
     ...style.fontSizeNormal,
     color: '#8EC5FF',
     textDecorationLine: 'underline',
-    flex: 1,
+    lineHeight: hp(2.35),
+    maxWidth: wp(58),
+  },
+  ownLinkText: {
+    color: '#B8DEFF',
   },
 });

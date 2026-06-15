@@ -12,6 +12,137 @@ import {
 import { mapAppStatusToDb, mapDbStatusToApp } from './projectsService';
 
 const PROJECT_TASKS_TABLE = 'project_tasks';
+const TASK_STATUS_HISTORY_TABLE = 'task_status_history';
+
+const generateStatusHistoryId = () => {
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `tsh-${Date.now()}-${suffix}`;
+};
+
+const fetchTaskCurrentState = async taskId => {
+  const { data, error } = await getSupabase()
+    .from(PROJECT_TASKS_TABLE)
+    .select('status, project_id')
+    .eq('id', taskId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+};
+
+const closeOpenTaskStatusHistory = async (taskId, exitedAt = new Date()) => {
+  const { data: openRow, error: fetchError } = await getSupabase()
+    .from(TASK_STATUS_HISTORY_TABLE)
+    .select('id, entered_at')
+    .eq('task_id', taskId)
+    .is('exited_at', null)
+    .order('entered_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (fetchError) {
+    throw fetchError;
+  }
+
+  if (!openRow) {
+    return;
+  }
+
+  const enteredAt = new Date(openRow.entered_at);
+  const durationSeconds = Math.max(
+    0,
+    Math.floor((exitedAt.getTime() - enteredAt.getTime()) / 1000),
+  );
+
+  const { error: updateError } = await getSupabase()
+    .from(TASK_STATUS_HISTORY_TABLE)
+    .update({
+      exited_at: exitedAt.toISOString(),
+      duration_seconds: durationSeconds,
+    })
+    .eq('id', openRow.id);
+
+  if (updateError) {
+    throw updateError;
+  }
+};
+
+const insertTaskStatusHistoryRow = async ({
+  taskId,
+  projectId,
+  fromStatus,
+  toStatus,
+  movedBy,
+  enteredAt,
+}) => {
+  const now = enteredAt || new Date().toISOString();
+  const row = {
+    id: generateStatusHistoryId(),
+    task_id: taskId,
+    project_id: projectId,
+    from_status: fromStatus ?? null,
+    to_status: toStatus,
+    entered_at: now,
+    exited_at: null,
+    duration_seconds: null,
+    moved_by: movedBy || null,
+    created_at: new Date().toISOString(),
+  };
+
+  const { error } = await getSupabase().from(TASK_STATUS_HISTORY_TABLE).insert(row);
+
+  if (error) {
+    throw error;
+  }
+};
+
+const recordTaskStatusHistoryCreate = async ({ taskId, projectId, toStatus, movedBy }) => {
+  await insertTaskStatusHistoryRow({
+    taskId,
+    projectId,
+    fromStatus: null,
+    toStatus,
+    movedBy,
+  });
+};
+
+const recordTaskStatusHistoryChange = async ({
+  taskId,
+  projectId,
+  fromStatus,
+  toStatus,
+  movedBy,
+}) => {
+  if (!toStatus || fromStatus === toStatus) {
+    return;
+  }
+
+  const now = new Date();
+  await closeOpenTaskStatusHistory(taskId, now);
+  await insertTaskStatusHistoryRow({
+    taskId,
+    projectId,
+    fromStatus,
+    toStatus,
+    movedBy,
+    enteredAt: now.toISOString(),
+  });
+};
+
+const safeRecordTaskStatusHistory = async (label, operation) => {
+  try {
+    await operation();
+  } catch (error) {
+    console.log(`[projectTasksService] ${label} failed`, {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+    });
+  }
+};
 
 const isNetworkError = error => {
   const message = String(error?.message || error || '').toLowerCase();
@@ -154,7 +285,7 @@ const runUpdate = async (taskId, row) => {
   return data || { id: taskId, ...row };
 };
 
-export const createProjectTask = async (task, { projectId, assigneeId }) => {
+export const createProjectTask = async (task, { projectId, assigneeId, movedBy }) => {
   const row = mapAppTaskToProjectTaskRow(task, { projectId, assigneeId });
 
   console.log('[projectTasksService] INSERT project_tasks', {
@@ -169,11 +300,21 @@ export const createProjectTask = async (task, { projectId, assigneeId }) => {
     'INSERT project_tasks',
   );
 
+  await safeRecordTaskStatusHistory('INSERT task_status_history (create)', () =>
+    recordTaskStatusHistoryCreate({
+      taskId: insertedRow.id,
+      projectId,
+      toStatus: row.status,
+      movedBy: movedBy || assigneeId,
+    }),
+  );
+
   console.log('[projectTasksService] INSERT success', insertedRow);
   return insertedRow;
 };
 
-export const updateProjectTask = async (taskId, task) => {
+export const updateProjectTask = async (taskId, task, { movedBy, projectId } = {}) => {
+  const current = await fetchTaskCurrentState(taskId);
   const row = buildTaskUpdateRow(task);
 
   console.log('[projectTasksService] UPDATE project_tasks', {
@@ -187,20 +328,44 @@ export const updateProjectTask = async (taskId, task) => {
     'UPDATE project_tasks',
   );
 
+  await safeRecordTaskStatusHistory('INSERT task_status_history (update)', () =>
+    recordTaskStatusHistoryChange({
+      taskId,
+      projectId: projectId || current?.project_id,
+      fromStatus: current?.status,
+      toStatus: row.status,
+      movedBy,
+    }),
+  );
+
   console.log('[projectTasksService] UPDATE success', updatedRow);
   return updatedRow;
 };
 
-export const updateProjectTaskStatus = async (taskId, appStatus) => {
+export const updateProjectTaskStatus = async (taskId, appStatus, { movedBy, projectId } = {}) => {
+  const current = await fetchTaskCurrentState(taskId);
+  const newDbStatus = mapAppStatusToDb(appStatus);
   const row = {
-    status: mapAppStatusToDb(appStatus),
+    status: newDbStatus,
     updated_at: new Date().toISOString(),
   };
 
-  return runWithNetworkRetry(
+  const updatedRow = await runWithNetworkRetry(
     () => runUpdate(taskId, row),
     'UPDATE project_tasks status',
   );
+
+  await safeRecordTaskStatusHistory('INSERT task_status_history (status)', () =>
+    recordTaskStatusHistoryChange({
+      taskId,
+      projectId: projectId || current?.project_id,
+      fromStatus: current?.status,
+      toStatus: newDbStatus,
+      movedBy,
+    }),
+  );
+
+  return updatedRow;
 };
 
 export const fetchTodayTasksForUser = async (user, projectNameById = {}) => {

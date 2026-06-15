@@ -6,11 +6,32 @@ import {
   isCloudinaryConfigured,
 } from '../config/cloudinaryConfig';
 
-const URL_PATTERN = /(https?:\/\/[^\s]+)/gi;
+const URL_DETECT_PATTERN = /(?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?)\]}'"]*/gi;
+const URL_SPLIT_PATTERN = /((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?)\]}'"]*)/gi;
+
+export const stripTrailingUrlPunctuation = url =>
+  String(url || '').replace(/[.,;:!?)}\]"']+$/, '');
+
+export const normalizeUrlForOpen = raw => {
+  let url = stripTrailingUrlPunctuation(String(raw || '').trim());
+  if (!url) {
+    return '';
+  }
+
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+
+  return url;
+};
 
 export const extractUrls = text => {
-  const matches = String(text || '').match(URL_PATTERN);
-  return matches ? [...new Set(matches)] : [];
+  const matches = String(text || '').match(URL_DETECT_PATTERN);
+  if (!matches) {
+    return [];
+  }
+
+  return [...new Set(matches.map(stripTrailingUrlPunctuation))];
 };
 
 export const isLinkOnlyMessage = text => {
@@ -20,7 +41,33 @@ export const isLinkOnlyMessage = text => {
   }
 
   const urls = extractUrls(trimmed);
-  return urls.length === 1 && urls[0] === trimmed;
+  if (urls.length !== 1) {
+    return false;
+  }
+
+  const normalizedTrimmed = stripTrailingUrlPunctuation(trimmed);
+  return normalizedTrimmed === urls[0];
+};
+
+export const splitTextWithLinks = text => {
+  const value = String(text || '');
+  if (!value) {
+    return [];
+  }
+
+  const parts = value.split(URL_SPLIT_PATTERN).filter(part => part !== '');
+  return parts.map(part => ({
+    type: /^(?:https?:\/\/|www\.)/i.test(part) ? 'link' : 'text',
+    value: part,
+  }));
+};
+
+export const resolveMessageTypeForContent = content => {
+  if (isLinkOnlyMessage(content)) {
+    return 'link';
+  }
+
+  return 'text';
 };
 
 const isImageUrl = url =>
@@ -49,7 +96,7 @@ export const getMessageKind = message => {
     return 'file';
   }
 
-  if (isLinkOnlyMessage(message?.text)) {
+  if (type === 'link' || isLinkOnlyMessage(message?.text)) {
     return 'link';
   }
 
