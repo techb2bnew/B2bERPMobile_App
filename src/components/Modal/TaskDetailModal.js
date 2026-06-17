@@ -1,8 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
+  Keyboard,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,8 +17,11 @@ import {
 import { Calendar } from 'react-native-calendars';
 import Icon from 'react-native-vector-icons/Feather';
 import DropdownSelect from '../DropdownSelect';
+import MultiSelectDropdown from '../MultiSelectDropdown';
 import {
   TASK_ASSIGNEE_LABEL,
+  TASK_ASSIGNEES_LABEL,
+  TASK_ASSIGNEE_REQUIRED,
   TASK_CANCEL_BUTTON,
   TASK_DUE_DATE_LABEL,
   TASK_EDIT_TASK_TITLE,
@@ -26,9 +32,11 @@ import {
   TASK_NEW_TASK_TITLE,
   TASK_PRIORITY_LABEL,
   TASK_SAVE_TASK_BUTTON,
+  TASK_SELECT_ASSIGNEES_PLACEHOLDER,
   TASK_SELECT_DUE_DATE,
   TASK_STATUS_LABEL,
   TASK_STATUS_READY_FOR_TESTING,
+  TASK_STATUS_REVIEW,
   TASK_TITLE_LABEL,
   TASK_TITLE_PLACEHOLDER,
   TASK_UPDATE_TASK_BUTTON,
@@ -45,7 +53,7 @@ import {
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
 import { getLocalDateKey } from '../../services/clockSessionsService';
-import { formatTaskDate, parseDueDateToKey } from '../../utils/projectUtils';
+import { formatTaskDate, normalizeAssigneeIds, parseDueDateToKey } from '../../utils/projectUtils';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const PURPLE = '#9B59B6';
@@ -54,6 +62,7 @@ const ALL_STATUS_OPTIONS = [
   TASK_FILTER_TODO,
   TASK_FILTER_IN_PROGRESS,
   TASK_STATUS_READY_FOR_TESTING,
+  TASK_STATUS_REVIEW,
   TASK_FILTER_DONE,
 ];
 
@@ -65,11 +74,17 @@ const TaskDetailModal = ({
   task,
   defaultStatus,
   hideDoneStatus = false,
+  allowMultipleAssignees = false,
+  employeeOptions = [],
+  currentUserId = '',
+  currentUserName = '',
   onClose,
   onSave,
 }) => {
   const statusOptions = hideDoneStatus
-    ? ALL_STATUS_OPTIONS.filter(option => option !== TASK_FILTER_DONE)
+    ? ALL_STATUS_OPTIONS.filter(
+        option => option !== TASK_FILTER_DONE && option !== TASK_STATUS_REVIEW,
+      )
     : ALL_STATUS_OPTIONS;
   const isCreate = mode === 'create';
   const [title, setTitle] = useState('');
@@ -77,10 +92,83 @@ const TaskDetailModal = ({
   const [status, setStatus] = useState(TASK_FILTER_TODO);
   const [priority, setPriority] = useState('medium');
   const [assignee, setAssignee] = useState('');
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState([]);
   const [dueDateKey, setDueDateKey] = useState('');
   const [calendarVisible, setCalendarVisible] = useState(false);
   const [estimatedHours, setEstimatedHours] = useState('');
   const [saving, setSaving] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  const scrollRef = useRef(null);
+  const scrollOffsetRef = useRef(0);
+  const keyboardHeightRef = useRef(0);
+  const lastFocusedFieldRef = useRef(null);
+  const titleFieldRef = useRef(null);
+  const hoursFieldRef = useRef(null);
+  const descriptionFieldRef = useRef(null);
+
+  const scrollFieldIntoView = useCallback(fieldRef => {
+    if (!fieldRef?.current || !scrollRef?.current) {
+      return;
+    }
+
+    lastFocusedFieldRef.current = fieldRef;
+
+    const run = () => {
+      const keyboardHeight = keyboardHeightRef.current;
+      if (!keyboardHeight || !fieldRef.current || !scrollRef.current) {
+        return;
+      }
+
+      fieldRef.current.measureInWindow((_x, fieldTop, _width, fieldHeight) => {
+        const windowHeight = Dimensions.get('window').height;
+        const safeBottom = windowHeight - keyboardHeight - hp(2);
+        const fieldBottom = fieldTop + fieldHeight;
+
+        if (fieldBottom <= safeBottom) {
+          return;
+        }
+
+        const overlap = fieldBottom - safeBottom;
+        scrollRef.current.scrollTo({
+          y: scrollOffsetRef.current + overlap,
+          animated: true,
+        });
+      });
+    };
+
+    run();
+    setTimeout(run, Platform.OS === 'ios' ? 120 : 250);
+  }, []);
+
+  useEffect(() => {
+    if (!visible) {
+      keyboardHeightRef.current = 0;
+      setKeyboardInset(0);
+      lastFocusedFieldRef.current = null;
+      return undefined;
+    }
+
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, event => {
+      keyboardHeightRef.current = event.endCoordinates.height;
+      setKeyboardInset(event.endCoordinates.height);
+      if (lastFocusedFieldRef.current) {
+        scrollFieldIntoView(lastFocusedFieldRef.current);
+      }
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      keyboardHeightRef.current = 0;
+      setKeyboardInset(0);
+      lastFocusedFieldRef.current = null;
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [visible, scrollFieldIntoView]);
 
   const dueDateLabel = useMemo(
     () => (dueDateKey ? formatTaskDate(dueDateKey) : ''),
@@ -123,7 +211,13 @@ const TaskDetailModal = ({
       setDescription('');
       setStatus(defaultStatus || TASK_FILTER_TODO);
       setPriority('medium');
-      setAssignee(task?.assignee || '');
+      if (allowMultipleAssignees) {
+        setSelectedAssigneeIds([]);
+        setAssignee('');
+      } else {
+        setSelectedAssigneeIds(currentUserId ? [currentUserId] : []);
+        setAssignee(currentUserName || task?.assignee || '');
+      }
       setDueDateKey(getLocalDateKey());
       setEstimatedHours('');
       return;
@@ -135,10 +229,31 @@ const TaskDetailModal = ({
     setDescription(task.description || '');
     setStatus(task.status || TASK_FILTER_TODO);
     setPriority(task.priority || 'medium');
+    const taskAssigneeIds = normalizeAssigneeIds(task.assigneeIds, task.assigneeId);
+    setSelectedAssigneeIds(taskAssigneeIds);
     setAssignee(task.assignee || '');
     setDueDateKey(parseDueDateToKey(task.dueDate) || getLocalDateKey());
     setEstimatedHours(task.estimatedHours || '');
-  }, [visible, task, isCreate, defaultStatus]);
+  }, [
+    visible,
+    task,
+    isCreate,
+    defaultStatus,
+    allowMultipleAssignees,
+    currentUserId,
+    currentUserName,
+  ]);
+
+  const selectedAssigneeLabel = useMemo(() => {
+    if (!allowMultipleAssignees) {
+      return assignee;
+    }
+
+    return selectedAssigneeIds
+      .map(id => employeeOptions.find(option => option.id === id)?.name || '')
+      .filter(Boolean)
+      .join(', ');
+  }, [allowMultipleAssignees, assignee, employeeOptions, selectedAssigneeIds]);
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -146,8 +261,12 @@ const TaskDetailModal = ({
       return;
     }
 
-    if (!assignee.trim()) {
-      Alert.alert('Required', 'Please enter an assignee.');
+    const resolvedAssigneeIds = allowMultipleAssignees
+      ? selectedAssigneeIds
+      : normalizeAssigneeIds(selectedAssigneeIds, currentUserId || task?.assigneeId);
+
+    if (resolvedAssigneeIds.length === 0) {
+      Alert.alert('Required', TASK_ASSIGNEE_REQUIRED);
       return;
     }
 
@@ -157,8 +276,9 @@ const TaskDetailModal = ({
       description: description.trim(),
       status,
       priority,
-      assignee: assignee.trim(),
-      assigneeId: task?.assigneeId || '',
+      assignee: selectedAssigneeLabel.trim(),
+      assigneeId: resolvedAssigneeIds[0] || '',
+      assigneeIds: resolvedAssigneeIds,
       dueDate: dueDateKey,
       estimatedHours: estimatedHours.trim(),
       hoursWorked: estimatedHours.trim()
@@ -198,41 +318,70 @@ const TaskDetailModal = ({
             <View style={styles.card}>
               <Text style={styles.title}>{isCreate ? TASK_NEW_TASK_TITLE : TASK_EDIT_TASK_TITLE}</Text>
 
-              <ScrollView showsVerticalScrollIndicator={false} bounces={false} style={styles.form}>
-                <Text style={styles.label}>{TASK_TITLE_LABEL} *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={title}
-                  onChangeText={setTitle}
-                  placeholder={TASK_TITLE_PLACEHOLDER}
-                  placeholderTextColor={darkPlaceholderColor}
-                />
+              <ScrollView
+                ref={scrollRef}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+                style={styles.form}
+                contentContainerStyle={[
+                  styles.formContent,
+                  keyboardInset > 0 && { paddingBottom: keyboardInset },
+                ]}
+                keyboardShouldPersistTaps="handled"
+                scrollEventThrottle={16}
+                onScroll={event => {
+                  scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+                }}>
+                <View ref={titleFieldRef} collapsable={false}>
+                  <Text style={styles.label}>{TASK_TITLE_LABEL} *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={title}
+                    onChangeText={setTitle}
+                    onFocus={() => scrollFieldIntoView(titleFieldRef)}
+                    placeholder={TASK_TITLE_PLACEHOLDER}
+                    placeholderTextColor={darkPlaceholderColor}
+                  />
+                </View>
 
-                <View style={styles.row}>
-                  <View style={styles.halfField}>
+                {allowMultipleAssignees ? (
+                  <MultiSelectDropdown
+                    label={TASK_ASSIGNEES_LABEL}
+                    required
+                    options={employeeOptions}
+                    selectedIds={selectedAssigneeIds}
+                    onChange={setSelectedAssigneeIds}
+                    placeholder={TASK_SELECT_ASSIGNEES_PLACEHOLDER}
+                    sheetTitle={TASK_ASSIGNEES_LABEL}
+                  />
+                ) : (
+                  <>
                     <Text style={styles.label}>{TASK_ASSIGNEE_LABEL} *</Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, styles.readonlyInput]}
                       value={assignee}
-                      onChangeText={setAssignee}
+                      editable={false}
                       placeholderTextColor={darkPlaceholderColor}
                     />
-                  </View>
+                  </>
+                )}
+
+                <View style={styles.row}>
                   <DropdownSelect
                     label={TASK_STATUS_LABEL}
                     value={status}
                     options={statusOptions}
                     onChange={setStatus}
                   />
-                </View>
-
-                <View style={styles.row}>
                   <DropdownSelect
                     label={TASK_PRIORITY_LABEL}
                     value={priority}
                     options={PRIORITY_OPTIONS}
                     onChange={setPriority}
                   />
+                </View>
+
+                <View style={styles.row}>
                   <View style={styles.halfField}>
                     <Text style={styles.label}>{TASK_DUE_DATE_LABEL}</Text>
                     <TouchableOpacity
@@ -254,24 +403,30 @@ const TaskDetailModal = ({
                   </View>
                 </View>
 
-                <Text style={styles.label}>{TASK_ESTIMATED_HOURS_LABEL}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={estimatedHours}
-                  onChangeText={setEstimatedHours}
-                  keyboardType="numeric"
-                  placeholderTextColor={darkPlaceholderColor}
-                />
+                <View ref={hoursFieldRef} collapsable={false}>
+                  <Text style={styles.label}>{TASK_ESTIMATED_HOURS_LABEL}</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={estimatedHours}
+                    onChangeText={setEstimatedHours}
+                    onFocus={() => scrollFieldIntoView(hoursFieldRef)}
+                    keyboardType="numeric"
+                    placeholderTextColor={darkPlaceholderColor}
+                  />
+                </View>
 
-                <Text style={styles.label}>{TASK_WORK_DESCRIPTION_LABEL}</Text>
-                <TextInput
-                  style={[styles.input, styles.textArea]}
-                  value={description}
-                  onChangeText={setDescription}
-                  multiline
-                  placeholder={TASK_WORK_DESCRIPTION_PLACEHOLDER}
-                  placeholderTextColor={darkPlaceholderColor}
-                />
+                <View ref={descriptionFieldRef} collapsable={false}>
+                  <Text style={styles.label}>{TASK_WORK_DESCRIPTION_LABEL}</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={description}
+                    onChangeText={setDescription}
+                    onFocus={() => scrollFieldIntoView(descriptionFieldRef)}
+                    multiline
+                    placeholder={TASK_WORK_DESCRIPTION_PLACEHOLDER}
+                    placeholderTextColor={darkPlaceholderColor}
+                  />
+                </View>
               </ScrollView>
 
               <View style={styles.actions}>
@@ -364,6 +519,9 @@ const styles = StyleSheet.create({
   form: {
     maxHeight: hp(62),
   },
+  formContent: {
+    paddingBottom: hp(2),
+  },
   label: {
     ...style.fontSizeSmall2x,
     color: darkTextSecondaryColor,
@@ -379,6 +537,9 @@ const styles = StyleSheet.create({
     paddingVertical: hp(1.2),
     ...style.fontSizeNormal,
     color: darkTextPrimaryColor,
+  },
+  readonlyInput: {
+    opacity: 0.85,
   },
   textArea: {
     minHeight: hp(12),

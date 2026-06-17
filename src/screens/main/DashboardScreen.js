@@ -36,6 +36,11 @@ import {
   MY_TASKS_EMPTY,
   MY_TASKS_TODAY_LABEL,
   MY_TASKS_TITLE,
+  MY_TASKS_TL_EMPTY,
+  MY_TASKS_TL_SUBTITLE,
+  DASHBOARD_TL_TASKS_SUBTITLE,
+  DASHBOARD_TL_REVIEW_LABEL,
+  TASK_ASSIGNED_TO_LABEL,
   OFFICE_ATTENDANCE_NOTE,
   OFFICE_LABEL,
   TASKS_DONE_LABEL,
@@ -52,12 +57,20 @@ import {
 import { style, spacings } from '../../constants/Fonts';
 import { MAIN_ROUTES } from '../../navigation/routes';
 import { syncSupabaseRealtimeAuth } from '../../lib/supabase';
-import { fetchProjectsForUser } from '../../services/projectsService';
+import { isTeamLeaderUser } from '../../constants/roles';
+import { fetchAllEmployeeProfiles } from '../../services/employeeService';
 import {
+  fetchAllProjects,
+  fetchProjectsWhereUserIsOnTeam,
+} from '../../services/projectsService';
+import {
+  fetchTeamLeaderTasks,
   fetchTodayTasksForUser,
+  subscribeToAllProjectTasksChanges,
   subscribeToAssigneeProjectTasksChanges,
 } from '../../services/projectTasksService';
 import { subscribeToProjectsChanges } from '../../services/projectsService';
+import { buildEmployeeNameMap } from '../../utils/projectUtils';
 import { useWeeklyHours } from '../../hooks/useWeeklyHours';
 import { getLocalDateKey } from '../../services/clockSessionsService';
 import {
@@ -86,6 +99,7 @@ const DashboardScreen = () => {
     elapsedSeconds,
   } = useAttendance();
   const displayName = getFirstName(user?.name || 'User');
+  const isTeamLeader = isTeamLeaderUser(user);
   const { weeklyData, loading: weeklyLoading } = useWeeklyHours(user?.id);
   const [todayTasks, setTodayTasks] = useState([]);
   const [tasksLoading, setTasksLoading] = useState(true);
@@ -95,12 +109,39 @@ const DashboardScreen = () => {
       setTasksLoading(true);
     }
     try {
-      const projects = await fetchProjectsForUser(user);
-      const projectNameById = projects.reduce((map, project) => {
+      const [teamProjects, allProjects, employees] = await Promise.all([
+        fetchProjectsWhereUserIsOnTeam(user),
+        fetchAllProjects(),
+        isTeamLeader ? fetchAllEmployeeProfiles() : Promise.resolve([]),
+      ]);
+      const projectNameById = allProjects.reduce((map, project) => {
         map[project.id] = project.name;
         return map;
       }, {});
-      setTodayTasks(await fetchTodayTasksForUser(user, projectNameById));
+
+      if (isTeamLeader) {
+        const employeeNameMap = buildEmployeeNameMap(employees);
+        const projectIds = teamProjects.map(project => project.id);
+        setTodayTasks(
+          await fetchTeamLeaderTasks({
+            assigneeId: user?.id,
+            projectIds,
+            projectNameById,
+            employeeNameMap,
+            assigneeName: user?.name || '',
+          }),
+        );
+      } else {
+        setTodayTasks(
+          await fetchTodayTasksForUser(
+            user,
+            teamProjects.reduce((map, project) => {
+              map[project.id] = project.name;
+              return map;
+            }, {}),
+          ),
+        );
+      }
     } catch {
       setTodayTasks([]);
     } finally {
@@ -108,7 +149,7 @@ const DashboardScreen = () => {
         setTasksLoading(false);
       }
     }
-  }, [user]);
+  }, [isTeamLeader, user]);
 
   useFocusEffect(
     useCallback(() => {
@@ -138,14 +179,16 @@ const DashboardScreen = () => {
       loadTodayTasks({ silent: true });
     };
 
-    const unsubscribeTasks = subscribeToAssigneeProjectTasksChanges(user.id, refresh);
+    const unsubscribeTasks = isTeamLeader
+      ? subscribeToAllProjectTasksChanges(refresh)
+      : subscribeToAssigneeProjectTasksChanges(user.id, refresh);
     const unsubscribeProjects = subscribeToProjectsChanges(refresh);
 
     return () => {
       unsubscribeTasks();
       unsubscribeProjects();
     };
-  }, [loadTodayTasks, user?.id]);
+  }, [isTeamLeader, loadTodayTasks, user?.id]);
 
   const clockStatusText = isClockedIn
     ? CLOCKED_IN_TEXT
@@ -160,13 +203,22 @@ const DashboardScreen = () => {
       : CLOCK_IN_TEXT;
 
   const taskStats = useMemo(() => {
+    if (isTeamLeader) {
+      return {
+        done: 0,
+        total: todayTasks.length,
+        reviewCount: todayTasks.length,
+      };
+    }
+
     const done = todayTasks.filter(task => task.status === TASK_FILTER_DONE).length;
 
     return {
       done,
       total: todayTasks.length,
+      reviewCount: 0,
     };
-  }, [todayTasks]);
+  }, [isTeamLeader, todayTasks]);
 
   const focusScore = useMemo(() => {
     const todayKey = getLocalDateKey();
@@ -209,7 +261,7 @@ const DashboardScreen = () => {
           <Text style={styles.subtitle}>
             {displayName}
             {DASHBOARD_LIVE_PREFIX}
-            {DASHBOARD_LIVE_SUFFIX}
+            {/* {DASHBOARD_LIVE_SUFFIX} */}
           </Text>
 
           {/* <View style={styles.clockCard}>
@@ -263,12 +315,16 @@ const DashboardScreen = () => {
             <View style={styles.statCard}>
               <View style={styles.statHeader}>
                 <Icon name="check-square" size={wp(4.5)} color={darkAccentGreenColor} />
-                <Text style={styles.statLabel}>{TASKS_DONE_LABEL}</Text>
+                <Text style={styles.statLabel}>
+                  {isTeamLeader ? DASHBOARD_TL_REVIEW_LABEL : TASKS_DONE_LABEL}
+                </Text>
               </View>
               <Text style={styles.statValue}>
                 {statsLoading
                   ? '--'
-                  : `${taskStats.done}/${taskStats.total}`}
+                  : isTeamLeader
+                    ? `${taskStats.reviewCount}`
+                    : `${taskStats.done}/${taskStats.total}`}
               </Text>
             </View>
           </View>
@@ -278,12 +334,16 @@ const DashboardScreen = () => {
             onPress={() => navigation.navigate(MAIN_ROUTES.PROJECTS_WORK)}
             activeOpacity={0.85}>
             <Text style={styles.sectionTitle}>{MY_TASKS_TITLE} →</Text>
-            <Text style={styles.sectionSubtitle}>{MY_TASKS_TODAY_LABEL}</Text>
+            <Text style={styles.sectionSubtitle}>
+              {isTeamLeader ? DASHBOARD_TL_TASKS_SUBTITLE : MY_TASKS_TODAY_LABEL}
+            </Text>
             {tasksLoading ? (
               <ActivityIndicator size="small" color={PURPLE} style={styles.tasksLoader} />
             ) : todayTasks.length === 0 ? (
               <View style={styles.emptyWrap}>
-                <Text style={styles.emptyText}>{MY_TASKS_EMPTY}</Text>
+                <Text style={styles.emptyText}>
+                  {isTeamLeader ? MY_TASKS_TL_EMPTY : MY_TASKS_EMPTY}
+                </Text>
               </View>
             ) : (
               <View style={styles.taskList}>
@@ -307,6 +367,9 @@ const DashboardScreen = () => {
                       </Text>
                       <Text style={styles.taskMeta} numberOfLines={1}>
                         {task.project} · {task.status}
+                        {isTeamLeader && task.assignee
+                          ? ` · ${TASK_ASSIGNED_TO_LABEL}: ${task.assignee}`
+                          : ''}
                       </Text>
                       {detailLine ? (
                         <Text style={styles.taskDetails} numberOfLines={2}>

@@ -267,6 +267,7 @@ const ChatScreen = () => {
       <UserAvatar
         userId={thread.peerId}
         name={thread.chatName}
+        imageUrl={thread.peerAvatarUrl}
         size={wp(12)}
         backgroundColor={getThreadAvatarColor(thread)}
         textStyle={styles.threadInitial}

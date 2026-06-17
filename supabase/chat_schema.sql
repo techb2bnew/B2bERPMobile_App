@@ -11,4 +11,5 @@
 
 -- Enable Realtime in Dashboard → Database → Replication:
 --   chat_messages (required)
+--   chat_channel_reads (required for live read receipts in direct chat)
 --   chat_channels (optional)

@@ -22,6 +22,7 @@ import {
   TASK_PRIORITY_LABEL,
   TASK_STATUS_LABEL,
   TASK_STATUS_READY_FOR_TESTING,
+  TASK_STATUS_REVIEW,
 } from '../../constants/Constants';
 import {
   darkBorderColor,
@@ -48,12 +49,15 @@ const ALL_STATUS_OPTIONS = [
   TASK_FILTER_TODO,
   TASK_FILTER_IN_PROGRESS,
   TASK_STATUS_READY_FOR_TESTING,
+  TASK_STATUS_REVIEW,
   TASK_FILTER_DONE,
 ];
 
 const TaskFilterModal = ({ visible, filters, hideDoneStatus = false, onClose, onApply, onClear }) => {
   const statusOptions = hideDoneStatus
-    ? ALL_STATUS_OPTIONS.filter(option => option !== TASK_FILTER_DONE)
+    ? ALL_STATUS_OPTIONS.filter(
+        option => option !== TASK_FILTER_DONE && option !== TASK_STATUS_REVIEW,
+      )
     : ALL_STATUS_OPTIONS;
   const [search, setSearch] = useState('');
   const [priority, setPriority] = useState(TASK_FILTER_ALL_PRIORITIES);

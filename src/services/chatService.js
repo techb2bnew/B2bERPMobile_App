@@ -5,6 +5,7 @@ import {
   syncSupabaseRealtimeAuth,
 } from '../lib/supabase';
 import { getEmployeeProfileImageUrl } from './employeeService';
+import { seedEmployeeProfileImageCacheFromProfiles } from '../hooks/useEmployeeProfileImage';
 import { getLastMessagePreview } from './chatMediaService';
 import { capitalizeName } from '../utils';
 
@@ -89,7 +90,10 @@ const fetchProfilesByIds = async ids => {
     throw error;
   }
 
-  return (data || []).reduce((map, profile) => {
+  const profiles = data || [];
+  seedEmployeeProfileImageCacheFromProfiles(profiles);
+
+  return profiles.reduce((map, profile) => {
     map[profile.id] = profile;
     return map;
   }, {});
@@ -178,6 +182,8 @@ export const mapChannelToThread = (
     slug: channel.slug,
     chatName,
     peerId: peerId || null,
+    peerAvatarUrl:
+      isDirect && peerId ? getEmployeeProfileImageUrl(profileMap[peerId]) : null,
     members: membersCount || 0,
     updatedAt: lastMessageAt || channel.created_at,
     lastMessage: lastMessage || '',
@@ -578,7 +584,41 @@ export const markChannelAsRead = async ({ channelId, userId }) => {
   }
 };
 
-const subscribeToTable = ({ channelPrefix, table, filter, onChange }) => {
+export const fetchChannelMemberLastReadAt = async ({ channelId, userId }) => {
+  if (!isSupabaseConfigured || !channelId || !userId) {
+    return null;
+  }
+
+  const { data, error } = await getSupabase()
+    .from(READS_TABLE)
+    .select('last_read_at')
+    .eq('channel_id', channelId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.last_read_at || null;
+};
+
+export const isMessageReadByPeer = (messageCreatedAt, peerLastReadAt) => {
+  if (!messageCreatedAt || !peerLastReadAt) {
+    return false;
+  }
+
+  const messageMs = new Date(messageCreatedAt).getTime();
+  const readMs = new Date(peerLastReadAt).getTime();
+
+  if (Number.isNaN(messageMs) || Number.isNaN(readMs)) {
+    return false;
+  }
+
+  return readMs >= messageMs;
+};
+
+const subscribeToTable = ({ channelPrefix, table, filter, onChange, events = REALTIME_EVENTS }) => {
   let active = true;
   let channel = null;
   let reconnectTimer = null;
@@ -609,7 +649,7 @@ const subscribeToTable = ({ channelPrefix, table, filter, onChange }) => {
     const channelName = createRealtimeChannelName(channelPrefix);
     const nextChannel = supabase.channel(channelName);
 
-    REALTIME_EVENTS.forEach(event => {
+    events.forEach(event => {
       nextChannel.on(
         'postgres_changes',
         {
@@ -664,6 +704,22 @@ export const subscribeToChannelMessages = (channelId, onInsert) =>
 
       const profileMap = await fetchProfilesByIds([payload.new.sender_id]);
       onInsert(mapMessageRow(payload.new, profileMap));
+    },
+  });
+
+export const subscribeToChannelReads = (channelId, onReadUpdate) =>
+  subscribeToTable({
+    channelPrefix: `chat-reads-${channelId}`,
+    table: READS_TABLE,
+    filter: `channel_id=eq.${channelId}`,
+    events: ['INSERT', 'UPDATE'],
+    onChange: payload => {
+      if (
+        (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') &&
+        payload.new
+      ) {
+        onReadUpdate(payload.new);
+      }
     },
   });
 

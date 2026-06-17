@@ -22,7 +22,7 @@ import {
 import ComingSoonModal from '../components/Modal/ComingSoonModal';
 import {
   COMMAND_CENTER_VERSION,
-  EMPLOYEE_ROLE_ID,
+  LOGIN_ENABLED_ROLE_IDS,
   ROLE_SELECTION_SUBTITLE,
   ROLE_SELECTION_TITLE,
   ROLES,
@@ -40,7 +40,7 @@ const RoleSelectionScreen = () => {
   const [showComingSoonModal, setShowComingSoonModal] = useState(false);
 
   const handleRoleSelect = role => {
-    if (role.id === EMPLOYEE_ROLE_ID) {
+    if (LOGIN_ENABLED_ROLE_IDS.includes(role.id)) {
       navigation.navigate(AUTH_ROUTES.LOGIN, { selectedRole: role });
       return;
     }

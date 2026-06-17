@@ -5,54 +5,89 @@ import {
 } from '../services/employeeService';
 
 const listeners = new Set();
-let cachedUserId = null;
-let cachedImageUrl = null;
-let inflightRequest = null;
+const imageCache = new Map();
+const inflightRequests = new Map();
 
 const notifyListeners = () => {
   listeners.forEach(listener => listener());
 };
 
+export const setEmployeeProfileImageCache = (userId, imageUrl) => {
+  if (!userId) {
+    return;
+  }
+
+  imageCache.set(userId, imageUrl ?? null);
+  notifyListeners();
+};
+
+export const seedEmployeeProfileImageCacheFromProfiles = profiles => {
+  if (!Array.isArray(profiles)) {
+    return;
+  }
+
+  profiles.forEach(profile => {
+    if (profile?.id) {
+      imageCache.set(profile.id, getEmployeeProfileImageUrl(profile));
+    }
+  });
+
+  notifyListeners();
+};
+
+export const clearEmployeeProfileImageCache = () => {
+  imageCache.clear();
+  inflightRequests.clear();
+  notifyListeners();
+};
+
 export const refreshEmployeeProfileImage = async userId => {
   if (!userId) {
-    cachedUserId = null;
-    cachedImageUrl = null;
-    notifyListeners();
+    clearEmployeeProfileImageCache();
     return null;
   }
 
-  if (inflightRequest?.userId === userId) {
-    return inflightRequest.promise;
+  if (inflightRequests.has(userId)) {
+    return inflightRequests.get(userId);
   }
 
   const promise = (async () => {
     try {
       const profile = await getEmployeeProfileById(userId);
-      cachedUserId = userId;
-      cachedImageUrl = getEmployeeProfileImageUrl(profile);
+      imageCache.set(userId, getEmployeeProfileImageUrl(profile));
     } catch {
-      cachedUserId = userId;
-      cachedImageUrl = null;
+      imageCache.set(userId, null);
     } finally {
-      inflightRequest = null;
+      inflightRequests.delete(userId);
       notifyListeners();
     }
 
-    return cachedImageUrl;
+    return imageCache.get(userId) ?? null;
   })();
 
-  inflightRequest = { userId, promise };
+  inflightRequests.set(userId, promise);
   return promise;
 };
 
 export const useEmployeeProfileImage = userId => {
-  const [imageUrl, setImageUrl] = useState(() =>
-    cachedUserId === userId ? cachedImageUrl : null,
-  );
+  const [imageUrl, setImageUrl] = useState(() => {
+    if (!userId || !imageCache.has(userId)) {
+      return null;
+    }
+
+    return imageCache.get(userId);
+  });
 
   useEffect(() => {
     const syncFromCache = () => {
-      setImageUrl(cachedUserId === userId ? cachedImageUrl : null);
+      if (!userId) {
+        setImageUrl(null);
+        return;
+      }
+
+      if (imageCache.has(userId)) {
+        setImageUrl(imageCache.get(userId));
+      }
     };
 
     listeners.add(syncFromCache);
@@ -65,8 +100,8 @@ export const useEmployeeProfileImage = userId => {
       return;
     }
 
-    if (cachedUserId === userId && cachedImageUrl) {
-      setImageUrl(cachedImageUrl);
+    if (imageCache.has(userId)) {
+      setImageUrl(imageCache.get(userId));
       return;
     }
 

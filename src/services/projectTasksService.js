@@ -3,16 +3,46 @@ import {
   getSupabase,
   syncSupabaseRealtimeAuth,
 } from '../lib/supabase';
+import { TASK_FILTER_DONE, TASK_STATUS_READY_FOR_TESTING } from '../constants/Constants';
 import {
   formatTaskDate,
   formatTaskEstimateHours,
   getUserId,
   isCreatedToday,
+  normalizeAssigneeIds,
+  rowAssignedToUserId,
 } from '../utils/projectUtils';
 import { mapAppStatusToDb, mapDbStatusToApp } from './projectsService';
 
 const PROJECT_TASKS_TABLE = 'project_tasks';
 const TASK_STATUS_HISTORY_TABLE = 'task_status_history';
+
+const fetchOpenTaskRowsForAssigneeCounts = async () => {
+  const withAssigneeIds = await getSupabase()
+    .from(PROJECT_TASKS_TABLE)
+    .select('project_id, status, assignee_id, assignee_ids')
+    .neq('status', 'done');
+
+  if (!withAssigneeIds.error) {
+    return withAssigneeIds.data || [];
+  }
+
+  const message = withAssigneeIds.error.message || '';
+  if (!message.includes('assignee_ids')) {
+    throw withAssigneeIds.error;
+  }
+
+  const fallback = await getSupabase()
+    .from(PROJECT_TASKS_TABLE)
+    .select('project_id, status, assignee_id')
+    .neq('status', 'done');
+
+  if (fallback.error) {
+    throw fallback.error;
+  }
+
+  return fallback.data || [];
+};
 
 const generateStatusHistoryId = () => {
   const suffix = Math.random().toString(36).slice(2, 8);
@@ -186,32 +216,60 @@ const toNullableText = value => {
   return trimmed || null;
 };
 
-export const mapProjectTaskRowToApp = (row, projectMeta = {}) => ({
-  id: row.id,
-  title: row.title || 'Untitled task',
-  description: row.work_notes || '',
-  status: mapDbStatusToApp(row.status),
-  priority: (row.priority || 'medium').toLowerCase(),
-  project: projectMeta.name || '',
-  projectId: row.project_id || '',
-  estimatedHours: String(row.est || '').replace(/h$/i, ''),
-  estimateLabel: formatTaskEstimateHours(row.est),
-  hoursWorked: row.est ? `${formatTaskEstimateHours(row.est)} est` : '',
-  assignee: projectMeta.assigneeName || '',
-  assigneeId: row.assignee_id || '',
-  createdDate: formatTaskDate(row.created_at || row.created_date),
-  dueDate: formatTaskDate(row.due),
-});
+const buildAssigneeLabel = (assigneeIds, employeeNameMap = {}, fallbackName = '') => {
+  const names = normalizeAssigneeIds(assigneeIds)
+    .map(id => employeeNameMap[id] || '')
+    .filter(Boolean);
 
-export const mapAppTaskToProjectTaskRow = (task, { projectId, assigneeId }) => {
+  if (names.length > 0) {
+    return names.join(', ');
+  }
+
+  return fallbackName || '';
+};
+
+export const mapProjectTaskRowToApp = (row, projectMeta = {}) => {
+  const employeeNameMap = projectMeta.employeeNameMap || {};
+  const assigneeIds = normalizeAssigneeIds(row.assignee_ids, row.assignee_id);
+  const assigneeName =
+    buildAssigneeLabel(assigneeIds, employeeNameMap, projectMeta.assigneeName) ||
+    projectMeta.assigneeName ||
+    '';
+
+  return {
+    id: row.id,
+    title: row.title || 'Untitled task',
+    description: row.work_notes || '',
+    status: mapDbStatusToApp(row.status),
+    priority: (row.priority || 'medium').toLowerCase(),
+    project: projectMeta.name || '',
+    projectId: row.project_id || '',
+    estimatedHours: String(row.est || '').replace(/h$/i, ''),
+    estimateLabel: formatTaskEstimateHours(row.est),
+    hoursWorked: row.est ? `${formatTaskEstimateHours(row.est)} est` : '',
+    assignee: assigneeName,
+    assigneeId: assigneeIds[0] || row.assignee_id || '',
+    assigneeIds,
+    createdDate: formatTaskDate(row.created_at || row.created_date),
+    dueDate: formatTaskDate(row.due),
+  };
+};
+
+export const mapAppTaskToProjectTaskRow = (task, { projectId, assigneeId, assigneeIds }) => {
   const estimated = task.estimatedHours
     ? `${String(task.estimatedHours).replace(/h$/i, '')}h`
     : null;
+  const resolvedAssigneeIds = normalizeAssigneeIds(
+    assigneeIds || task.assigneeIds,
+    assigneeId || task.assigneeId,
+  );
+  const primaryAssigneeId = resolvedAssigneeIds[0] || assigneeId || task.assigneeId || '';
 
   return {
     id: task.id || `task-${Date.now()}`,
     project_id: projectId,
-    assignee_id: assigneeId,
+    assignee_id: primaryAssigneeId,
+    assignee_ids: resolvedAssigneeIds,
     title: task.title?.trim() || 'Untitled task',
     work_notes: toWorkNotes(task.description),
     status: mapAppStatusToDb(task.status),
@@ -230,7 +288,24 @@ export const fetchProjectTasksForUser = async (projectId, assigneeId) => {
     .from(PROJECT_TASKS_TABLE)
     .select('*')
     .eq('project_id', projectId)
-    .eq('assignee_id', assigneeId)
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []).filter(row => rowAssignedToUserId(row, assigneeId));
+};
+
+export const fetchProjectTasksForProject = async projectId => {
+  if (!projectId) {
+    return [];
+  }
+
+  const { data, error } = await getSupabase()
+    .from(PROJECT_TASKS_TABLE)
+    .select('*')
+    .eq('project_id', projectId)
     .order('updated_at', { ascending: false });
 
   if (error) {
@@ -240,12 +315,16 @@ export const fetchProjectTasksForUser = async (projectId, assigneeId) => {
   return data || [];
 };
 
-const buildTaskUpdateRow = task => {
+const buildTaskUpdateRow = (task, { assigneeIds } = {}) => {
   const estimated = task.estimatedHours
     ? `${String(task.estimatedHours).replace(/h$/i, '')}h`
     : null;
+  const resolvedAssigneeIds = normalizeAssigneeIds(
+    assigneeIds || task.assigneeIds,
+    task.assigneeId,
+  );
 
-  return {
+  const row = {
     title: task.title?.trim() || 'Untitled task',
     work_notes: toWorkNotes(task.description),
     status: mapAppStatusToDb(task.status),
@@ -254,45 +333,94 @@ const buildTaskUpdateRow = task => {
     est: estimated,
     updated_at: new Date().toISOString(),
   };
+
+  if (resolvedAssigneeIds.length > 0) {
+    row.assignee_id = resolvedAssigneeIds[0];
+    row.assignee_ids = resolvedAssigneeIds;
+  }
+
+  return row;
 };
 
 const runInsert = async row => {
-  const { data, error } = await getSupabase()
-    .from(PROJECT_TASKS_TABLE)
-    .insert(row)
-    .select('*')
-    .single();
+  try {
+    const { data, error } = await getSupabase()
+      .from(PROJECT_TASKS_TABLE)
+      .insert(row)
+      .select('*')
+      .single();
 
-  if (error) {
+    if (error) {
+      throw error;
+    }
+
+    return data || row;
+  } catch (error) {
+    const message = String(error?.message || '').toLowerCase();
+    if (message.includes('assignee_ids') && row.assignee_ids) {
+      const { assignee_ids: _removed, ...fallbackRow } = row;
+      const { data, error: retryError } = await getSupabase()
+        .from(PROJECT_TASKS_TABLE)
+        .insert(fallbackRow)
+        .select('*')
+        .single();
+
+      if (retryError) {
+        throw retryError;
+      }
+
+      return data || fallbackRow;
+    }
+
     throw error;
   }
-
-  return data || row;
 };
 
 const runUpdate = async (taskId, row) => {
-  const { data, error } = await getSupabase()
-    .from(PROJECT_TASKS_TABLE)
-    .update(row)
-    .eq('id', taskId)
-    .select('*')
-    .single();
+  try {
+    const { data, error } = await getSupabase()
+      .from(PROJECT_TASKS_TABLE)
+      .update(row)
+      .eq('id', taskId)
+      .select('*')
+      .single();
 
-  if (error) {
+    if (error) {
+      throw error;
+    }
+
+    return data || { id: taskId, ...row };
+  } catch (error) {
+    const message = String(error?.message || '').toLowerCase();
+    if (message.includes('assignee_ids') && row.assignee_ids) {
+      const { assignee_ids: _removed, ...fallbackRow } = row;
+      const { data, error: retryError } = await getSupabase()
+        .from(PROJECT_TASKS_TABLE)
+        .update(fallbackRow)
+        .eq('id', taskId)
+        .select('*')
+        .single();
+
+      if (retryError) {
+        throw retryError;
+      }
+
+      return data || { id: taskId, ...fallbackRow };
+    }
+
     throw error;
   }
-
-  return data || { id: taskId, ...row };
 };
 
-export const createProjectTask = async (task, { projectId, assigneeId, movedBy }) => {
-  const row = mapAppTaskToProjectTaskRow(task, { projectId, assigneeId });
+export const createProjectTask = async (task, { projectId, assigneeId, assigneeIds, movedBy }) => {
+  const row = mapAppTaskToProjectTaskRow(task, { projectId, assigneeId, assigneeIds });
 
   console.log('[projectTasksService] INSERT project_tasks', {
     table: PROJECT_TASKS_TABLE,
     row: JSON.stringify(row),
     projectId,
-    assigneeId,
+    assigneeId: row.assignee_id,
+    assigneeIds: row.assignee_ids,
   });
 
   const insertedRow = await runWithNetworkRetry(
@@ -305,7 +433,7 @@ export const createProjectTask = async (task, { projectId, assigneeId, movedBy }
       taskId: insertedRow.id,
       projectId,
       toStatus: row.status,
-      movedBy: movedBy || assigneeId,
+      movedBy: movedBy || row.assignee_id,
     }),
   );
 
@@ -313,9 +441,9 @@ export const createProjectTask = async (task, { projectId, assigneeId, movedBy }
   return insertedRow;
 };
 
-export const updateProjectTask = async (taskId, task, { movedBy, projectId } = {}) => {
+export const updateProjectTask = async (taskId, task, { movedBy, projectId, assigneeIds } = {}) => {
   const current = await fetchTaskCurrentState(taskId);
-  const row = buildTaskUpdateRow(task);
+  const row = buildTaskUpdateRow(task, { assigneeIds });
 
   console.log('[projectTasksService] UPDATE project_tasks', {
     table: PROJECT_TASKS_TABLE,
@@ -377,7 +505,6 @@ export const fetchTodayTasksForUser = async (user, projectNameById = {}) => {
   const { data, error } = await getSupabase()
     .from(PROJECT_TASKS_TABLE)
     .select('*')
-    .eq('assignee_id', assigneeId)
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -385,6 +512,7 @@ export const fetchTodayTasksForUser = async (user, projectNameById = {}) => {
   }
 
   return (data || [])
+    .filter(row => rowAssignedToUserId(row, assigneeId))
     .filter(row => isCreatedToday(row.created_at || row.created_date))
     .map(row =>
       mapProjectTaskRowToApp(row, {
@@ -399,10 +527,20 @@ export const fetchOpenTaskCountsByProject = async assigneeId => {
     return {};
   }
 
+  const data = await fetchOpenTaskRowsForAssigneeCounts();
+
+  return data
+    .filter(row => rowAssignedToUserId(row, assigneeId))
+    .reduce((counts, row) => {
+      counts[row.project_id] = (counts[row.project_id] || 0) + 1;
+      return counts;
+    }, {});
+};
+
+export const fetchOpenTaskCountsForAllProjects = async () => {
   const { data, error } = await getSupabase()
     .from(PROJECT_TASKS_TABLE)
     .select('project_id, status')
-    .eq('assignee_id', assigneeId)
     .neq('status', 'done');
 
   if (error) {
@@ -413,6 +551,119 @@ export const fetchOpenTaskCountsByProject = async assigneeId => {
     counts[row.project_id] = (counts[row.project_id] || 0) + 1;
     return counts;
   }, {});
+};
+
+export const fetchTasksForAssignee = async (
+  assigneeId,
+  { projectNameById = {}, assigneeName = '', employeeNameMap = {} } = {},
+) => {
+  if (!assigneeId) {
+    return [];
+  }
+
+  const { data, error } = await getSupabase()
+    .from(PROJECT_TASKS_TABLE)
+    .select('*')
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || [])
+    .filter(row => rowAssignedToUserId(row, assigneeId))
+    .map(row =>
+      mapProjectTaskRowToApp(row, {
+        name: projectNameById[row.project_id] || '',
+        assigneeName,
+        employeeNameMap,
+      }),
+    );
+};
+
+const isReadyForTestingDbStatus = status =>
+  mapDbStatusToApp(status) === TASK_STATUS_READY_FOR_TESTING;
+
+export const fetchReadyForTestingTasks = async ({
+  projectIds = [],
+  projectNameById = {},
+  employeeNameMap = {},
+} = {}) => {
+  let rows = [];
+
+  if (projectIds.length > 0) {
+    const results = await Promise.allSettled(
+      projectIds.map(projectId => fetchProjectTasksForProject(projectId)),
+    );
+    rows = results
+      .filter(result => result.status === 'fulfilled')
+      .flatMap(result => result.value || []);
+  } else {
+    const { data, error } = await getSupabase()
+      .from(PROJECT_TASKS_TABLE)
+      .select('*')
+      .eq('status', 'ready-for-testing')
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    rows = data || [];
+  }
+
+  return rows
+    .filter(row => isReadyForTestingDbStatus(row.status))
+    .map(row =>
+      mapProjectTaskRowToApp(row, {
+        name: projectNameById[row.project_id] || '',
+        assigneeName: employeeNameMap[row.assignee_id] || '',
+      }),
+    );
+};
+
+export const fetchTeamLeaderTasks = async ({
+  assigneeId,
+  projectIds = [],
+  projectNameById = {},
+  employeeNameMap = {},
+  assigneeName = '',
+} = {}) => {
+  let readyTasks = [];
+  let assignedTasks = [];
+
+  try {
+    readyTasks = await fetchReadyForTestingTasks({
+      projectIds,
+      projectNameById,
+      employeeNameMap,
+    });
+  } catch (error) {
+    console.log('[projectTasksService] fetchReadyForTestingTasks failed', error?.message);
+  }
+
+  if (assigneeId) {
+    try {
+      assignedTasks = await fetchTasksForAssignee(assigneeId, {
+        projectNameById,
+        assigneeName,
+      });
+    } catch (error) {
+      console.log('[projectTasksService] fetchTasksForAssignee failed', error?.message);
+    }
+  }
+
+  const assignedOpenTasks = assignedTasks.filter(task => task.status !== TASK_FILTER_DONE);
+  const merged = new Map();
+
+  readyTasks.forEach(task => merged.set(task.id, task));
+  assignedOpenTasks.forEach(task => {
+    if (!merged.has(task.id)) {
+      merged.set(task.id, task);
+    }
+  });
+
+  return Array.from(merged.values());
 };
 
 const REALTIME_EVENTS = ['INSERT', 'UPDATE', 'DELETE'];
@@ -549,7 +800,13 @@ export const subscribeToUserProjectTasksChanges = (projectId, assigneeId, onChan
 
   return subscribeToProjectTasksTable({
     channelPrefix: `user-project-tasks-${projectId}-${assigneeId}`,
-    matchesRow: row => row.project_id === projectId && row.assignee_id === assigneeId,
+    matchesRow: row => row.project_id === projectId && rowAssignedToUserId(row, assigneeId),
     onChange,
   });
 };
+
+export const subscribeToAllProjectTasksChanges = onChange =>
+  subscribeToProjectTasksTable({
+    channelPrefix: 'all-project-tasks',
+    onChange,
+  });

@@ -36,8 +36,9 @@ import {
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
 import { useAuth } from '../../context/AuthContext';
-import { fetchAllEmployeeProfiles } from '../../services/employeeService';
+import { fetchAllEmployeeProfiles, getEmployeeProfileImageUrl } from '../../services/employeeService';
 import { buildDirectSlug } from '../../services/chatService';
+import UserAvatar from '../UserAvatar';
 import { capitalizeName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const PURPLE = '#9B59B6';
@@ -89,7 +90,12 @@ const StartChatModal = ({ visible, mode = 'direct', onClose, onStartChat }) => {
       try {
         const data = await fetchAllEmployeeProfiles();
         if (!cancelled) {
-          setEmployees(data);
+          setEmployees(
+            data.map(employee => ({
+              ...employee,
+              profileImageUrl: getEmployeeProfileImageUrl(employee),
+            })),
+          );
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -182,11 +188,12 @@ const StartChatModal = ({ visible, mode = 'direct', onClose, onStartChat }) => {
       style={[styles.employeeRow, isSelected && styles.employeeRowSelected]}
       onPress={onPress}
       activeOpacity={0.85}>
-      <View style={styles.employeeAvatar}>
-        <Text style={styles.employeeInitial}>
-          {(employee.name || 'U').charAt(0).toUpperCase()}
-        </Text>
-      </View>
+      <UserAvatar
+        userId={employee.id}
+        name={employee.name}
+        imageUrl={employee.profileImageUrl}
+        size={wp(9)}
+      />
       <View style={styles.employeeInfo}>
         <Text style={styles.employeeName}>{capitalizeName(employee.name)}</Text>
         {employee.email ? (
@@ -353,19 +360,6 @@ const styles = StyleSheet.create({
   employeeRowSelected: {
     borderColor: PURPLE,
     backgroundColor: 'rgba(155, 89, 182, 0.12)',
-  },
-  employeeAvatar: {
-    width: wp(9),
-    height: wp(9),
-    borderRadius: wp(4.5),
-    backgroundColor: PURPLE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  employeeInitial: {
-    ...style.fontSizeSmall2x,
-    ...style.fontWeightMedium,
-    color: darkTextPrimaryColor,
   },
   employeeInfo: {
     flex: 1,

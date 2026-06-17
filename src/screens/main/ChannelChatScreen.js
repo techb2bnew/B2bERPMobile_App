@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   InteractionManager,
   KeyboardAvoidingView,
   Linking,
@@ -15,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { pick, types } from '@react-native-documents/picker';
@@ -37,6 +38,7 @@ import {
   CALL_EMPLOYEE_NO_PHONE,
 } from '../../constants/Constants';
 import ChatMessageContent from '../../components/ChatMessageContent';
+import ChatReadReceipt from '../../components/ChatReadReceipt';
 import ChatAttachModal from '../../components/Modal/ChatAttachModal';
 import UserAvatar from '../../components/UserAvatar';
 import {
@@ -52,11 +54,14 @@ import { style } from '../../constants/Fonts';
 import { useAuth } from '../../context/AuthContext';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import {
+  fetchChannelMemberLastReadAt,
   fetchChannelMessages,
+  isMessageReadByPeer,
   markChannelAsRead,
   resolveChannelForChatParams,
   sendChannelMessage,
   subscribeToChannelMessages,
+  subscribeToChannelReads,
 } from '../../services/chatService';
 import { getEmployeeProfileById } from '../../services/employeeService';
 import { resolveMessageTypeForContent, uploadChatMedia } from '../../services/chatMediaService';
@@ -72,11 +77,13 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const isUuid = value => UUID_PATTERN.test(String(value || ''));
 
 const MESSAGE_AVATAR_SIZE = wp(8);
+const READ_RECEIPT_POLL_MS = 2500;
 
 const ChatMessageAvatar = ({ message, backgroundColor }) => (
   <UserAvatar
     userId={message.senderId}
     name={message.name}
+    imageUrl={message.avatarUrl}
     size={MESSAGE_AVATAR_SIZE}
     backgroundColor={backgroundColor || message.color}
     textStyle={styles.avatarText}
@@ -141,8 +148,35 @@ const ChannelChatScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [attachOpen, setAttachOpen] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
+  const [peerLastReadAt, setPeerLastReadAt] = useState(null);
 
   const isBusy = sending || uploadingMedia;
+
+  const refreshPeerLastReadAt = useCallback(async () => {
+    if (!effectiveChannelId || !isDirect || !peerId || !isSupabaseConfigured) {
+      return;
+    }
+
+    try {
+      const lastRead = await fetchChannelMemberLastReadAt({
+        channelId: effectiveChannelId,
+        userId: peerId,
+      });
+      setPeerLastReadAt(current => (current === lastRead ? current : lastRead));
+    } catch {
+      // Ignore polling errors; next refresh will retry.
+    }
+  }, [effectiveChannelId, isDirect, peerId]);
+
+  const scheduleReadReceiptRefresh = useCallback(() => {
+    if (!isDirect || !peerId) {
+      return;
+    }
+
+    refreshPeerLastReadAt();
+    setTimeout(() => refreshPeerLastReadAt(), 800);
+    setTimeout(() => refreshPeerLastReadAt(), 2500);
+  }, [isDirect, peerId, refreshPeerLastReadAt]);
 
   const appendMessage = useCallback(newMessage => {
     setMessages(current => {
@@ -199,6 +233,15 @@ const ChannelChatScreen = () => {
         if (!cancelled) {
           setMessages(rows);
           await markChannelAsRead({ channelId: nextChannelId, userId: user.id });
+          if (isDirect && peerId) {
+            const lastRead = await fetchChannelMemberLastReadAt({
+              channelId: nextChannelId,
+              userId: peerId,
+            });
+            if (!cancelled) {
+              setPeerLastReadAt(lastRead);
+            }
+          }
         }
       } catch {
         if (!cancelled) {
@@ -228,8 +271,55 @@ const ChannelChatScreen = () => {
       if (user?.id) {
         markChannelAsRead({ channelId: effectiveChannelId, userId: user.id }).catch(() => {});
       }
+      if (isDirect && peerId && newMessage.senderId === peerId) {
+        scheduleReadReceiptRefresh();
+      }
     });
-  }, [appendMessage, effectiveChannelId, user?.id]);
+  }, [
+    appendMessage,
+    effectiveChannelId,
+    isDirect,
+    peerId,
+    scheduleReadReceiptRefresh,
+    user?.id,
+  ]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshPeerLastReadAt();
+    }, [refreshPeerLastReadAt]),
+  );
+
+  useEffect(() => {
+    if (!effectiveChannelId || !isDirect || !peerId || !isSupabaseConfigured) {
+      setPeerLastReadAt(null);
+      return undefined;
+    }
+
+    refreshPeerLastReadAt();
+
+    const intervalId = setInterval(refreshPeerLastReadAt, READ_RECEIPT_POLL_MS);
+    const unsubscribe = subscribeToChannelReads(effectiveChannelId, row => {
+      if (row?.user_id === peerId && row?.last_read_at) {
+        setPeerLastReadAt(row.last_read_at);
+        return;
+      }
+
+      refreshPeerLastReadAt();
+    });
+
+    const appStateSub = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') {
+        refreshPeerLastReadAt();
+      }
+    });
+
+    return () => {
+      clearInterval(intervalId);
+      unsubscribe();
+      appStateSub.remove();
+    };
+  }, [effectiveChannelId, isDirect, peerId, refreshPeerLastReadAt]);
 
   useEffect(() => {
     if (!isDirect || !peerId) {
@@ -331,6 +421,9 @@ const ChannelChatScreen = () => {
         fileSize: uploaded.fileSize,
       });
       appendMessage(newMessage);
+      if (isDirect && peerId) {
+        scheduleReadReceiptRefresh();
+      }
     } catch (error) {
       if (__DEV__) {
         console.warn('[chat] media send failed:', error?.message || error);
@@ -466,12 +559,18 @@ const ChannelChatScreen = () => {
     }
 
     if (isOwn) {
+      const isRead =
+        isDirect && isMessageReadByPeer(item.createdAt, peerLastReadAt);
+
       return (
         <View key={item.id} style={[styles.ownRow, { marginTop }]}>
           <View style={[styles.ownBubble, !clusterStart && styles.ownBubbleStacked]}>
           <View style={styles.bubbleInner}>
             <ChatMessageContent message={item} isOwn />
-            <Text style={styles.ownTime}>{item.time}</Text>
+            <View style={styles.ownMetaRow}>
+              <Text style={styles.ownTime}>{item.time}</Text>
+              {isDirect ? <ChatReadReceipt read={isRead} /> : null}
+            </View>
           </View>
           </View>
         </View>
@@ -520,6 +619,9 @@ const ChannelChatScreen = () => {
       });
       setMessage('');
       appendMessage(newMessage);
+      if (isDirect && peerId) {
+        scheduleReadReceiptRefresh();
+      }
     } catch {
       Alert.alert('Chat', CHAT_SEND_ERROR);
     } finally {
@@ -820,11 +922,15 @@ const styles = StyleSheet.create({
   ownBubbleText: {
     color: '#F5F5F5',
   },
+  ownMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: wp(2),
+    marginBottom: hp(0.1),
+  },
   ownTime: {
     ...style.fontSizeSmall,
     color: 'rgba(255, 255, 255, 0.55)',
-    marginLeft: wp(2),
-    marginBottom: hp(0.1),
   },
   otherTime: {
     ...style.fontSizeSmall,

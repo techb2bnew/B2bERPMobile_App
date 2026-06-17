@@ -61,16 +61,16 @@ const QuickActionMenu = ({
       animationType="fade"
       statusBarTranslucent
       onRequestClose={onClose}>
-      <View style={styles.overlay}>
+      <TouchableOpacity
+        style={styles.overlay}
+        activeOpacity={1}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Close quick actions">
         <TouchableOpacity
-          style={styles.backdrop}
           activeOpacity={1}
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close quick actions"
-        />
-
-        <View style={styles.menuWrap}>
+          onPress={() => {}}
+          style={styles.menuWrap}>
           <View style={styles.menu}>
             {MENU_ITEMS.map((item, index) => (
               <TouchableOpacity
@@ -88,10 +88,10 @@ const QuickActionMenu = ({
               </TouchableOpacity>
             ))}
           </View>
-        </View>
+        </TouchableOpacity>
 
         <AiAssistantFab onPress={onClose} badgeCount={badgeCount} />
-      </View>
+      </TouchableOpacity>
     </Modal>
   );
 };
@@ -101,9 +101,6 @@ export default QuickActionMenu;
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
   },
   menuWrap: {

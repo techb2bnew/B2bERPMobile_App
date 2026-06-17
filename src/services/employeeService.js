@@ -1,5 +1,9 @@
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { EMAIL_ALREADY_EXISTS } from '../constants/Constants';
+import {
+  LOGIN_ROLE_MISMATCH_MESSAGE,
+  profileMatchesLoginRole,
+} from '../constants/roles';
 import { signInWithEmail, signOut, signUpWithEmail } from './authService';
 
 const EMPLOYEE_PROFILES_TABLE = 'employee_profiles';
@@ -93,7 +97,7 @@ export const fetchAllEmployeeProfiles = async () => {
 
   const { data, error } = await getSupabase()
     .from(EMPLOYEE_PROFILES_TABLE)
-    .select('id, name, email, phone')
+    .select('id, name, email, phone, profile_image_url, avatar')
     .order('name');
 
   if (error) {
@@ -103,10 +107,27 @@ export const fetchAllEmployeeProfiles = async () => {
   return data || [];
 };
 
+const isValidProfileImageUrl = value => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  return (
+    /^https?:\/\//i.test(trimmed) ||
+    /^data:image\//i.test(trimmed) ||
+    /^file:\/\//i.test(trimmed)
+  );
+};
+
 export const getEmployeeProfileImageUrl = profile => {
   const candidates = [profile?.profile_image_url, profile?.avatar];
 
-  const url = candidates.find(value => typeof value === 'string' && value.trim().length > 0);
+  const url = candidates.find(isValidProfileImageUrl);
 
   return url ? url.trim() : null;
 };
@@ -220,6 +241,12 @@ export const loginEmployee = async ({ email, password, selectedRole }) => {
   if (!profile) {
     await signOut();
     throw new Error('Employee not found in employee_profiles table');
+  }
+
+  const selectedRoleId = selectedRole?.id || '';
+  if (!profileMatchesLoginRole(profile.role, selectedRoleId)) {
+    await signOut();
+    throw new Error(LOGIN_ROLE_MISMATCH_MESSAGE);
   }
 
   return {

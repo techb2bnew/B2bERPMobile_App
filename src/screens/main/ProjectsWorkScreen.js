@@ -38,8 +38,11 @@ import { style } from '../../constants/Fonts';
 import { MAIN_ROUTES } from '../../navigation/routes';
 import { syncSupabaseRealtimeAuth } from '../../lib/supabase';
 import { fetchAllEmployeeProfiles } from '../../services/employeeService';
+import { isTeamLeaderUser } from '../../constants/roles';
 import {
   fetchOpenTaskCountsByProject,
+  fetchOpenTaskCountsForAllProjects,
+  subscribeToAllProjectTasksChanges,
   subscribeToAssigneeProjectTasksChanges,
 } from '../../services/projectTasksService';
 import {
@@ -72,6 +75,7 @@ const ProjectsWorkScreen = () => {
   const isFirstLoad = useRef(true);
 
   const displayName = getFirstName(user?.name || 'User');
+  const isTeamLeader = isTeamLeaderUser(user);
 
   const loadProjects = useCallback(
     async ({ isRefresh = false, silent = false } = {}) => {
@@ -86,14 +90,25 @@ const ProjectsWorkScreen = () => {
       }
 
       try {
-      const [data, employees, taskCounts] = await Promise.all([
-        fetchProjectsForUser(user),
-        fetchAllEmployeeProfiles(),
-        user?.id ? fetchOpenTaskCountsByProject(user.id) : Promise.resolve({}),
-      ]);
-      setProjects(data);
-      setEmployeeNameMap(buildEmployeeNameMap(employees));
-      setOpenTaskCounts(taskCounts);
+        const [data, employees] = await Promise.all([
+          fetchProjectsForUser(user),
+          fetchAllEmployeeProfiles(),
+        ]);
+
+        let taskCounts = {};
+        try {
+          taskCounts = isTeamLeader
+            ? await fetchOpenTaskCountsForAllProjects()
+            : user?.id
+              ? await fetchOpenTaskCountsByProject(user.id)
+              : {};
+        } catch {
+          taskCounts = {};
+        }
+
+        setProjects(data);
+        setEmployeeNameMap(buildEmployeeNameMap(employees));
+        setOpenTaskCounts(taskCounts);
       } catch (loadError) {
         if (!silent) {
           setError(loadError?.message || 'Unable to load projects.');
@@ -104,7 +119,7 @@ const ProjectsWorkScreen = () => {
         setRefreshing(false);
       }
     },
-    [user],
+    [isTeamLeader, user],
   );
 
   const onRefresh = useCallback(() => {
@@ -141,15 +156,17 @@ const ProjectsWorkScreen = () => {
     };
 
     const unsubscribeProjects = subscribeToProjectsChanges(refresh);
-    const unsubscribeTasks = user?.id
-      ? subscribeToAssigneeProjectTasksChanges(user.id, refresh)
-      : () => {};
+    const unsubscribeTasks = isTeamLeader
+      ? subscribeToAllProjectTasksChanges(refresh)
+      : user?.id
+        ? subscribeToAssigneeProjectTasksChanges(user.id, refresh)
+        : () => {};
 
     return () => {
       unsubscribeProjects();
       unsubscribeTasks();
     };
-  }, [loadProjects, user?.id]);
+  }, [isTeamLeader, loadProjects, user?.id]);
 
   const filteredProjects = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -192,7 +209,9 @@ const ProjectsWorkScreen = () => {
             <Text style={styles.workspaceLabel}>{PROJECTS_WORK_WORKSPACE}</Text>
           </View>
 
-          <Text style={styles.heading}>{displayName}'s projects</Text>
+          <Text style={styles.heading}>
+            {isTeamLeader ? 'All projects' : `${displayName}'s projects`}
+          </Text>
           <Text style={styles.subtitle}>
             {projects.length} {PROJECTS_WORK_SUBTITLE_SUFFIX}
           </Text>
@@ -235,7 +254,7 @@ const ProjectsWorkScreen = () => {
                       <View style={styles.statusBadge}>
                         <Text style={styles.statusText}>{project.status || 'In Progress'}</Text>
                       </View>
-                      <Icon name="star" size={wp(4.5)} color={darkTextSecondaryColor} />
+                      {/* <Icon name="star" size={wp(4.5)} color={darkTextSecondaryColor} /> */}
                     </View>
 
                     <Text style={styles.projectName}>{project.name}</Text>

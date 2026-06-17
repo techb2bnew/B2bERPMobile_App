@@ -19,6 +19,7 @@ import TaskFilterModal from '../../components/Modal/TaskFilterModal';
 import { useAuth } from '../../context/AuthContext';
 import {
   TASK_ADD_CARD,
+  TASK_ASSIGNED_TO_LABEL,
   TASK_FILTER_ALL_PRIORITIES,
   TASK_FILTER_ALL_STATUSES,
   TASK_FILTER_BUTTON,
@@ -28,6 +29,7 @@ import {
   TASK_MANAGEMENT_TITLE,
   TASK_NEW_BUTTON,
   TASK_STATUS_READY_FOR_TESTING,
+  TASK_STATUS_REVIEW,
   TASK_VIEW_KANBAN,
   TASK_VIEW_LIST,
 } from '../../constants/Constants';
@@ -43,25 +45,37 @@ import {
 import { style } from '../../constants/Fonts';
 import {
   createProjectTask,
+  fetchProjectTasksForProject,
   fetchProjectTasksForUser,
   mapProjectTaskRowToApp,
+  subscribeToProjectTasksChanges,
   subscribeToUserProjectTasksChanges,
   updateProjectTask,
   updateProjectTaskStatus,
 } from '../../services/projectTasksService';
+import { fetchAllEmployeeProfiles } from '../../services/employeeService';
 import { syncSupabaseRealtimeAuth } from '../../lib/supabase';
-import { isEmployeeUser } from '../../constants/roles';
+import { isEmployeeUser, isTeamLeaderUser } from '../../constants/roles';
+import { buildEmployeeNameMap, normalizeAssigneeIds, rowAssignedToUserId } from '../../utils/projectUtils';
 import { getFirstName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const TASKS_POLL_INTERVAL_MS = 5000;
 
 const PURPLE = '#9B59B6';
 const BLUE = '#2D7DD2';
+const ORANGE = '#F47C20';
 
-const KANBAN_COLUMNS = [
+const EMPLOYEE_KANBAN_COLUMNS = [
   TASK_FILTER_TODO,
   TASK_FILTER_IN_PROGRESS,
   TASK_STATUS_READY_FOR_TESTING,
+];
+
+const REVIEWER_KANBAN_COLUMNS = [
+  TASK_FILTER_TODO,
+  TASK_FILTER_IN_PROGRESS,
+  TASK_STATUS_READY_FOR_TESTING,
+  TASK_STATUS_REVIEW,
   TASK_FILTER_DONE,
 ];
 
@@ -69,8 +83,11 @@ const COLUMN_COLORS = {
   [TASK_FILTER_TODO]: darkTextSecondaryColor,
   [TASK_FILTER_IN_PROGRESS]: BLUE,
   [TASK_STATUS_READY_FOR_TESTING]: PURPLE,
+  [TASK_STATUS_REVIEW]: ORANGE,
   [TASK_FILTER_DONE]: darkAccentGreenColor,
 };
+
+const EMPLOYEE_HIDDEN_STATUSES = [TASK_FILTER_DONE, TASK_STATUS_REVIEW];
 
 const PRIORITY_STYLES = {
   low: { bg: 'rgba(148, 163, 184, 0.2)', color: '#94a3b8' },
@@ -94,14 +111,14 @@ const TaskManagementScreen = () => {
   const defaultAssignee = user?.name || displayName;
   const defaultAssigneeId = user?.id || '';
   const isEmployee = isEmployeeUser(user);
+  const isReviewer = isTeamLeaderUser(user);
 
-  const kanbanColumns = useMemo(
-    () =>
-      isEmployee
-        ? KANBAN_COLUMNS.filter(column => column !== TASK_FILTER_DONE)
-        : KANBAN_COLUMNS,
-    [isEmployee],
-  );
+  const kanbanColumns = useMemo(() => {
+    if (isReviewer) {
+      return REVIEWER_KANBAN_COLUMNS;
+    }
+    return EMPLOYEE_KANBAN_COLUMNS;
+  }, [isReviewer]);
 
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -115,12 +132,14 @@ const TaskManagementScreen = () => {
   const [activeView, setActiveView] = useState(TASK_VIEW_KANBAN);
   const [dragState, setDragState] = useState(null);
   const [hoverColumn, setHoverColumn] = useState(null);
+  const [employeeOptions, setEmployeeOptions] = useState([]);
 
   const columnRefs = useRef({});
   const dragStateRef = useRef(null);
   const cardDragTimers = useRef({});
   const cardTouchStart = useRef({});
   const taskMetaRef = useRef({ name: '', assigneeName: '' });
+  const employeeNameMapRef = useRef({});
   const isSavingRef = useRef(false);
   const pendingRealtimeRefreshRef = useRef(false);
 
@@ -151,8 +170,29 @@ const TaskManagementScreen = () => {
       }
 
       try {
-        const rows = await fetchProjectTasksForUser(projectId, defaultAssigneeId);
-        setTasks(rows.map(row => mapProjectTaskRowToApp(row, taskMeta)));
+        const [rows, employees] = await Promise.all([
+          isReviewer
+            ? fetchProjectTasksForProject(projectId)
+            : fetchProjectTasksForUser(projectId, defaultAssigneeId),
+          fetchAllEmployeeProfiles(),
+        ]);
+        const employeeNameMap = buildEmployeeNameMap(employees);
+        employeeNameMapRef.current = employeeNameMap;
+        setEmployeeOptions(
+          employees
+            .filter(employee => employee?.id)
+            .map(employee => ({ id: employee.id, name: employee.name || 'Employee' })),
+        );
+
+        setTasks(
+          rows.map(row =>
+            mapProjectTaskRowToApp(row, {
+              name: taskMeta.name || projectName || '',
+              employeeNameMap,
+              assigneeName: employeeNameMap[row.assignee_id] || taskMeta.assigneeName,
+            }),
+          ),
+        );
       } catch (error) {
         Alert.alert('Load Failed', error?.message || 'Unable to load project tasks.');
         setTasks([]);
@@ -160,7 +200,7 @@ const TaskManagementScreen = () => {
         setLoading(false);
       }
     },
-    [defaultAssigneeId, projectId, taskMeta],
+    [defaultAssigneeId, isReviewer, projectId, taskMeta],
   );
 
   const flushPendingRealtimeRefresh = useCallback(() => {
@@ -193,14 +233,24 @@ const TaskManagementScreen = () => {
         return;
       }
 
-      if (row.project_id !== projectId || row.assignee_id !== defaultAssigneeId) {
+      if (row.project_id !== projectId) {
         setTasks(prev => prev.filter(task => task.id !== row.id));
         return;
       }
 
-      const appTask = mapProjectTaskRowToApp(row, taskMetaRef.current);
+      if (!isReviewer && !rowAssignedToUserId(row, defaultAssigneeId)) {
+        setTasks(prev => prev.filter(task => task.id !== row.id));
+        return;
+      }
 
-      if (isEmployee && appTask.status === TASK_FILTER_DONE) {
+      const appTask = mapProjectTaskRowToApp(row, {
+        name: taskMetaRef.current.name || projectName || '',
+        employeeNameMap: employeeNameMapRef.current,
+        assigneeName:
+          employeeNameMapRef.current[row.assignee_id] || taskMetaRef.current.assigneeName,
+      });
+
+      if (isEmployee && EMPLOYEE_HIDDEN_STATUSES.includes(appTask.status)) {
         setTasks(prev => prev.filter(task => task.id !== row.id));
         return;
       }
@@ -219,7 +269,7 @@ const TaskManagementScreen = () => {
         return prev.map(task => (task.id === row.id ? appTask : task));
       });
     },
-    [defaultAssigneeId, isEmployee, loadProjectTasks, projectId],
+    [defaultAssigneeId, isEmployee, isReviewer, loadProjectTasks, projectId],
   );
 
   applyRealtimePayloadRef.current = applyRealtimePayload;
@@ -259,16 +309,16 @@ const TaskManagementScreen = () => {
       return undefined;
     }
 
-    const unsubscribe = subscribeToUserProjectTasksChanges(
-      projectId,
-      defaultAssigneeId,
-      payload => {
-        applyRealtimePayloadRef.current?.(payload);
-      },
-    );
+    const onRealtimeChange = payload => {
+      applyRealtimePayloadRef.current?.(payload);
+    };
+
+    const unsubscribe = isReviewer
+      ? subscribeToProjectTasksChanges(projectId, onRealtimeChange)
+      : subscribeToUserProjectTasksChanges(projectId, defaultAssigneeId, onRealtimeChange);
 
     return unsubscribe;
-  }, [defaultAssigneeId, projectId]);
+  }, [defaultAssigneeId, isReviewer, projectId]);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -281,7 +331,7 @@ const TaskManagementScreen = () => {
   const filteredTasks = useMemo(() => {
     const query = filters.search.trim().toLowerCase();
     const visibleTasks = isEmployee
-      ? tasks.filter(task => task.status !== TASK_FILTER_DONE)
+      ? tasks.filter(task => !EMPLOYEE_HIDDEN_STATUSES.includes(task.status))
       : tasks;
 
     return visibleTasks.filter(task => {
@@ -311,7 +361,11 @@ const TaskManagementScreen = () => {
 
   const openCreateTask = (status = TASK_FILTER_TODO) => {
     setFormMode('create');
-    setSelectedTask({ assignee: defaultAssignee, assigneeId: defaultAssigneeId });
+    setSelectedTask({
+      assignee: defaultAssignee,
+      assigneeId: defaultAssigneeId,
+      assigneeIds: isEmployee && defaultAssigneeId ? [defaultAssigneeId] : [],
+    });
     setDefaultStatus(status);
     setFormVisible(true);
   };
@@ -324,7 +378,7 @@ const TaskManagementScreen = () => {
 
   const moveTaskToColumn = useCallback(
     async (taskId, newStatus) => {
-      if (isEmployee && newStatus === TASK_FILTER_DONE) {
+      if (isEmployee && EMPLOYEE_HIDDEN_STATUSES.includes(newStatus)) {
         return;
       }
 
@@ -485,17 +539,31 @@ const TaskManagementScreen = () => {
       return false;
     }
 
-    if (isEmployee && taskData?.status === TASK_FILTER_DONE) {
+    if (
+      isEmployee &&
+      (taskData?.status === TASK_FILTER_DONE || taskData?.status === TASK_STATUS_REVIEW)
+    ) {
       Alert.alert('Not Allowed', 'Employees can only update tasks up to Ready for Testing.');
       return false;
     }
 
+    const assigneeIds = normalizeAssigneeIds(
+      taskData.assigneeIds,
+      taskData.assigneeId || defaultAssigneeId,
+    );
     const payload = {
       ...taskData,
       project: projectName,
       projectId,
-      assigneeId: taskData.assigneeId || defaultAssigneeId,
-      assignee: taskData.assignee || defaultAssignee,
+      assigneeId: assigneeIds[0] || defaultAssigneeId,
+      assigneeIds,
+      assignee:
+        taskData.assignee ||
+        assigneeIds
+          .map(id => employeeNameMapRef.current[id] || '')
+          .filter(Boolean)
+          .join(', ') ||
+        defaultAssignee,
     };
 
     console.log('[TaskSave] handleSaveTask', {
@@ -512,26 +580,44 @@ const TaskManagementScreen = () => {
     setSaving(true);
     try {
       if (isCreate) {
-        const createMeta = { projectId, assigneeId: defaultAssigneeId, movedBy: defaultAssigneeId };
+        const createMeta = {
+          projectId,
+          assigneeId: payload.assigneeId,
+          assigneeIds: payload.assigneeIds,
+          movedBy: defaultAssigneeId,
+        };
         console.log('[TaskSave] calling createProjectTask', { payload, createMeta });
         const createdRow = await createProjectTask(payload, createMeta);
         console.log('[TaskSave] createProjectTask success', createdRow);
-        setTasks(prev => [...prev, mapProjectTaskRowToApp(createdRow, taskMeta)]);
+        setTasks(prev => [
+          ...prev,
+          mapProjectTaskRowToApp(createdRow, {
+            name: projectName || '',
+            employeeNameMap: employeeNameMapRef.current,
+            assigneeName: payload.assignee,
+          }),
+        ]);
         return true;
       }
 
-      console.log('[TaskSave] calling updateProjectTask', {
-        taskId: payload.id,
-        payload,
-      });
       const updatedRow = await updateProjectTask(payload.id, payload, {
         movedBy: defaultAssigneeId,
         projectId,
+        assigneeIds: payload.assigneeIds,
       });
       console.log('[TaskSave] updateProjectTask success', updatedRow);
       setTasks(prev =>
         prev.map(task =>
-          task.id === payload.id ? mapProjectTaskRowToApp(updatedRow, taskMeta) : task,
+          task.id === payload.id
+            ? mapProjectTaskRowToApp(updatedRow, {
+                name: projectName || '',
+                employeeNameMap: employeeNameMapRef.current,
+                assigneeName:
+                  payload.assignee ||
+                  employeeNameMapRef.current[updatedRow.assignee_id] ||
+                  task.assignee,
+              })
+            : task,
         ),
       );
       return true;
@@ -561,6 +647,11 @@ const TaskManagementScreen = () => {
 
     return (
       <>
+        {isReviewer && task.assignee ? (
+          <Text style={styles.assigneeHighlight}>
+            {TASK_ASSIGNED_TO_LABEL}: {task.assignee}
+          </Text>
+        ) : null}
         <View style={[styles.priorityBadge, { backgroundColor: priorityStyle.bg }]}>
           <Text style={[styles.priorityText, { color: priorityStyle.color }]}>{task.priority}</Text>
         </View>
@@ -652,8 +743,9 @@ const TaskManagementScreen = () => {
         </View>
 
         <Text style={styles.subtitle}>
-          {projectName || 'Project'} · {displayName}'s tasks · {filteredTasks.length} task
-          {filteredTasks.length === 1 ? '' : 's'} · live from Supabase
+          {projectName || 'Project'} · {isReviewer ? 'team tasks' : `${displayName}'s tasks`} ·{' '}
+          {filteredTasks.length} task
+          {filteredTasks.length === 1 ? '' : 's'} 
           {saving ? ' · saving...' : ''}
         </Text>
 
@@ -768,6 +860,10 @@ const TaskManagementScreen = () => {
         task={selectedTask}
         defaultStatus={defaultStatus}
         hideDoneStatus={isEmployee}
+        allowMultipleAssignees={isReviewer}
+        employeeOptions={employeeOptions}
+        currentUserId={defaultAssigneeId}
+        currentUserName={defaultAssignee}
         onClose={() => setFormVisible(false)}
         onSave={handleSaveTask}
       />
@@ -1043,6 +1139,12 @@ const styles = StyleSheet.create({
   assigneeName: {
     ...style.fontSizeSmall,
     color: darkTextSecondaryColor,
+  },
+  assigneeHighlight: {
+    ...style.fontSizeSmall2x,
+    ...style.fontWeightMedium,
+    color: ORANGE,
+    marginBottom: hp(0.8),
   },
   dueRow: {
     flexDirection: 'row',

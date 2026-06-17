@@ -111,7 +111,34 @@ export const taskAssignedToUser = (task, user) => {
     return false;
   }
 
-  return task.assigneeId === userId || task.employeeId === userId;
+  if (task.assigneeId === userId || task.employeeId === userId) {
+    return true;
+  }
+
+  const assigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds : [];
+  return assigneeIds.includes(userId);
+};
+
+export const normalizeAssigneeIds = (assigneeIds, fallbackAssigneeId = '') => {
+  const fromArray = Array.isArray(assigneeIds) ? assigneeIds : [];
+  const parsed = fromArray
+    .concat(fallbackAssigneeId ? [fallbackAssigneeId] : [])
+    .map(id => String(id || '').trim())
+    .filter(Boolean);
+
+  return [...new Set(parsed)];
+};
+
+export const rowAssignedToUserId = (row, userId) => {
+  if (!row || !userId) {
+    return false;
+  }
+
+  if (row.assignee_id === userId) {
+    return true;
+  }
+
+  return normalizeAssigneeIds(row.assignee_ids, row.assignee_id).includes(userId);
 };
 
 export const isProjectAssignedToUser = (project, user) => {

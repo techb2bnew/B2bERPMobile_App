@@ -205,8 +205,9 @@ const LoginScreen = () => {
 
             <TouchableOpacity
               style={styles.forgotButton}
-              onPress={() => navigateWithRole(AUTH_ROUTES.FORGOT_PASSWORD)}>
-              <Text style={styles.forgotText}>{FORGOT_PASSWORD_TEXT}</Text>
+              // onPress={() => navigateWithRole(AUTH_ROUTES.FORGOT_PASSWORD)}
+            >
+              {/* <Text style={styles.forgotText}>{FORGOT_PASSWORD_TEXT}</Text> */}
             </TouchableOpacity>
 
             <FormErrorBanner message={submitError} />

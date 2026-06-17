@@ -3,6 +3,7 @@ import {
   TASK_FILTER_IN_PROGRESS,
   TASK_FILTER_TODO,
   TASK_STATUS_READY_FOR_TESTING,
+  TASK_STATUS_REVIEW,
 } from '../constants/Constants';
 import {
   createRealtimeChannelName,
@@ -18,6 +19,7 @@ import {
   isProjectAssignedToUser,
   taskAssignedToUser,
 } from '../utils/projectUtils';
+import { isTeamLeaderUser } from '../constants/roles';
 
 const PROJECTS_TABLE = 'projects';
 
@@ -27,7 +29,8 @@ const DB_STATUS_TO_APP = {
   'in-progress': TASK_FILTER_IN_PROGRESS,
   in_progress: TASK_FILTER_IN_PROGRESS,
   'in progress': TASK_FILTER_IN_PROGRESS,
-  review: TASK_STATUS_READY_FOR_TESTING,
+  review: TASK_STATUS_REVIEW,
+  'in-review': TASK_STATUS_REVIEW,
   'ready-for-testing': TASK_STATUS_READY_FOR_TESTING,
   ready_for_testing: TASK_STATUS_READY_FOR_TESTING,
   'ready for testing': TASK_STATUS_READY_FOR_TESTING,
@@ -38,6 +41,7 @@ const APP_STATUS_TO_DB = {
   [TASK_FILTER_TODO]: 'todo',
   [TASK_FILTER_IN_PROGRESS]: 'in-progress',
   [TASK_STATUS_READY_FOR_TESTING]: 'ready-for-testing',
+  [TASK_STATUS_REVIEW]: 'review',
   [TASK_FILTER_DONE]: 'done',
 };
 
@@ -142,6 +146,20 @@ export const fetchAllProjects = async () => {
 };
 
 export const fetchProjectsForUser = async user => {
+  if (!getUserId(user) && !getUserName(user)) {
+    return [];
+  }
+
+  const projects = await fetchAllProjects();
+
+  if (isTeamLeaderUser(user)) {
+    return projects;
+  }
+
+  return projects.filter(project => isProjectAssignedToUser(project, user));
+};
+
+export const fetchProjectsWhereUserIsOnTeam = async user => {
   if (!getUserId(user) && !getUserName(user)) {
     return [];
   }

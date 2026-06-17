@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { darkTextPrimaryColor } from '../constants/Color';
+import { whiteColor } from '../constants/Color';
 import { style } from '../constants/Fonts';
 import { useEmployeeProfileImage } from '../hooks/useEmployeeProfileImage';
+import { getMemberInitial } from '../utils/projectUtils';
 import { widthPercentageToDP as wp } from '../utils';
 
 const PURPLE = '#9B59B6';
@@ -11,16 +12,28 @@ const PURPLE = '#9B59B6';
 const UserAvatar = ({
   userId,
   name,
+  imageUrl: imageUrlProp,
   size = wp(8.5),
   style: containerStyle,
   textStyle,
   backgroundColor = PURPLE,
 }) => {
   const { user } = useAuth();
+  const [imageError, setImageError] = useState(false);
   const resolvedUserId = userId || user?.id;
-  const imageUrl = useEmployeeProfileImage(resolvedUserId);
-  const initial = (name || user?.name || 'U').charAt(0).toUpperCase();
+  const fetchedImageUrl = useEmployeeProfileImage(
+    imageUrlProp !== undefined ? null : resolvedUserId,
+  );
+  const imageUrl = imageUrlProp !== undefined ? imageUrlProp : fetchedImageUrl;
+  const displayName = (name || user?.name || 'User').trim();
+  const initial = getMemberInitial(displayName);
   const radius = size / 2;
+  const fontSize = Math.round(Math.max(11, size * 0.38));
+  const showInitial = !imageUrl || imageError;
+
+  useEffect(() => {
+    setImageError(false);
+  }, [imageUrl]);
 
   return (
     <View
@@ -34,10 +47,14 @@ const UserAvatar = ({
         },
         containerStyle,
       ]}>
-      {imageUrl ? (
-        <Image source={{ uri: imageUrl }} style={styles.image} />
+      {showInitial ? (
+        <Text style={[styles.text, { fontSize }, textStyle]}>{initial}</Text>
       ) : (
-        <Text style={[styles.text, textStyle]}>{initial}</Text>
+        <Image
+          source={{ uri: imageUrl }}
+          style={styles.image}
+          onError={() => setImageError(true)}
+        />
       )}
     </View>
   );
@@ -56,8 +73,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   text: {
-    ...style.fontSizeNormal,
     ...style.fontWeightMedium1x,
-    color: darkTextPrimaryColor,
+    color: whiteColor,
   },
 });
