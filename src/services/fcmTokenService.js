@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import messaging from '@react-native-firebase/messaging';
+import notifee from '@notifee/react-native';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { getUserSession } from './authStorage';
 import { updateEmployeeFcmToken } from './employeeService';
@@ -29,7 +30,18 @@ const saveFcmToken = async token => {
 
 export const requestNotificationPermission = async () => {
   if (Platform.OS === 'ios') {
-    const authStatus = await messaging().requestPermission();
+    await notifee.requestPermission({
+      alert: true,
+      sound: true,
+      badge: true,
+    });
+
+    const authStatus = await messaging().requestPermission({
+      alert: true,
+      sound: true,
+      badge: true,
+    });
+
     return (
       authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
       authStatus === messaging.AuthorizationStatus.PROVISIONAL

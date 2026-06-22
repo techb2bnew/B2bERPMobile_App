@@ -1,14 +1,19 @@
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import AiAssistant from '../../components/AiAssistant';
 import AppHeader from '../../components/AppHeader';
-import {
-  MARK_ALL_READ,
-  NOTIFICATIONS_SUBTITLE,
-  NOTIFICATIONS_TITLE,
-} from '../../constants/Constants';
+import { MARK_ALL_READ, NOTIFICATIONS_TITLE } from '../../constants/Constants';
 import {
   darkBackgroundColor,
   darkBorderColor,
@@ -17,154 +22,263 @@ import {
   darkTextSecondaryColor,
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
+import { useAuth } from '../../context/AuthContext';
+import { useNotificationBadgeContext } from '../../context/NotificationBadgeContext';
+import { MAIN_ROUTES } from '../../navigation/routes';
+import {
+  fetchUserNotifications,
+  formatNotificationTime,
+  getNotificationTypeLabel,
+  getSenderLabelFromTitle,
+  markAllNotificationsAsRead,
+  markNotificationAsRead,
+  subscribeToUserNotifications,
+} from '../../services/notificationService';
 import { widthPercentageToDP as wp, heightPercentageToDP as hp } from '../../utils';
 
 const PURPLE = '#9B59B6';
+const CHAT_COLOR = '#3DDC84';
 const CARD_RADIUS = wp(4);
 const HORIZONTAL_PAD = wp(5);
 const CARD_GAP = hp(1);
+const FILTERS = ['All', 'Unread', 'Chat'];
 
-const FILTERS = ['All', 'Alert', 'CRM', 'Revenue', 'Tasks', 'HR', 'AI'];
+const getNotificationIcon = type => {
+  if (type === 'chat_message') {
+    return 'message-square';
+  }
+  return 'bell';
+};
 
-const NOTIFICATIONS = [
-  {
-    id: '1',
-    type: 'Alert',
-    icon: 'alert-triangle',
-    color: '#F5A623',
-    title: 'Dev team at 140% capacity',
-    body: 'Sprint #14 has 42 points assigned but team capacity is 30. Reassign or defer 12 points.',
-    time: '5 min ago',
-    unread: true,
-  },
-  {
-    id: '2',
-    type: 'CRM',
-    icon: 'zap',
-    color: '#2D7DD2',
-    title: 'TechCorp deal idle for 3 days',
-    body: 'Proposal sent on Mar 8 (₹4.2L). No follow-up logged. Suggested action: call today.',
-    time: '1 hr ago',
-    unread: true,
-  },
-  {
-    id: '3',
-    type: 'Revenue',
-    icon: 'dollar-sign',
-    color: '#3DDC84',
-    title: 'Kavya Nair closed ₹8.2L deal',
-    body: 'Enterprise plan — 12-month contract. Commission: ₹82,000.',
-    time: '3 hr ago',
-    unread: true,
-  },
-  {
-    id: '4',
-    type: 'Tasks',
-    icon: 'activity',
-    color: '#F85149',
-    title: 'Sprint #14 has 3 blockers',
-    body: 'API integration, design review, and QA sign-off are blocking 6 tasks.',
-    time: 'Yesterday',
-    unread: false,
-  },
-  {
-    id: '5',
-    type: 'HR',
-    icon: 'clock',
-    color: PURPLE,
-    title: 'Rahul Gupta late login — 4th time',
-    body: 'Logged in at 10:42 AM. Policy threshold is 3 late arrivals per month.',
-    time: 'Yesterday',
-    unread: false,
-  },
-  {
-    id: '6',
-    type: 'AI',
-    icon: 'cpu',
-    color: '#2D7DD2',
-    title: 'AI Weekly Summary Ready',
-    body: 'Team productivity up 12%. 3 deals at risk. 2 employees flagged for burnout.',
-    time: '2 days ago',
-    unread: false,
-  },
-];
+const getNotificationColor = type => {
+  if (type === 'chat_message') {
+    return CHAT_COLOR;
+  }
+  return PURPLE;
+};
 
 const NotificationsScreen = () => {
+  const navigation = useNavigation();
+  const { user } = useAuth();
+  const { refreshUnreadCount } = useNotificationBadgeContext();
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
+  const [markingAllRead, setMarkingAllRead] = useState(false);
 
-  const filtered =
-    activeFilter === 'All'
-      ? NOTIFICATIONS
-      : NOTIFICATIONS.filter(item => item.type === activeFilter);
+  const loadNotifications = useCallback(async () => {
+    if (!user?.id) {
+      setNotifications([]);
+      return;
+    }
+
+    const rows = await fetchUserNotifications(user.id);
+    setNotifications(rows);
+  }, [user?.id]);
+
+  const refresh = useCallback(async () => {
+    if (!user?.id) {
+      setNotifications([]);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      await loadNotifications();
+      await refreshUnreadCount();
+    } catch {
+      // Keep the last loaded list if refresh fails.
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [loadNotifications, refreshUnreadCount, user?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      refresh();
+    }, [refresh]),
+  );
+
+  useEffect(() => {
+    if (!user?.id) {
+      return undefined;
+    }
+
+    const unsubscribe = subscribeToUserNotifications(user.id, () => {
+      loadNotifications().catch(() => {});
+      refreshUnreadCount().catch(() => {});
+    });
+
+    return unsubscribe;
+  }, [loadNotifications, refreshUnreadCount, user?.id]);
+
+  const unreadCount = useMemo(
+    () => notifications.filter(item => !item.is_read).length,
+    [notifications],
+  );
+
+  const filtered = useMemo(() => {
+    if (activeFilter === 'Unread') {
+      return notifications.filter(item => !item.is_read);
+    }
+
+    if (activeFilter === 'Chat') {
+      return notifications.filter(item => item.type === 'chat_message');
+    }
+
+    return notifications;
+  }, [activeFilter, notifications]);
+
+  const subtitle = `${unreadCount} unread · ${notifications.length} total`;
+
+  const handleMarkAllRead = async () => {
+    if (!user?.id || unreadCount === 0 || markingAllRead) {
+      return;
+    }
+
+    setMarkingAllRead(true);
+    try {
+      await markAllNotificationsAsRead(user.id);
+      await refresh();
+    } finally {
+      setMarkingAllRead(false);
+    }
+  };
+
+  const handleNotificationPress = async item => {
+    if (!user?.id) {
+      return;
+    }
+
+    if (!item.is_read) {
+      await markNotificationAsRead({ notificationId: item.id, userId: user.id }).catch(() => {});
+      await refreshUnreadCount();
+      setNotifications(current =>
+        current.map(row => (row.id === item.id ? { ...row, is_read: true } : row)),
+      );
+    }
+
+    if (item.type === 'chat_message' && item.reference_id) {
+      navigation.navigate(MAIN_ROUTES.CHANNEL_CHAT, {
+        chatType: item.sender_id ? 'direct' : 'group',
+        channelId: item.reference_id,
+        chatName: getSenderLabelFromTitle(item.title),
+        peerId: item.sender_id,
+      });
+    }
+  };
 
   return (
     <View style={styles.root}>
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <AppHeader title={NOTIFICATIONS_TITLE} />
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.topRow}>
-          <View style={styles.topRowLeft}>
-            <Text style={styles.heading}>{NOTIFICATIONS_TITLE}</Text>
-            <Text style={styles.subtitle}>{NOTIFICATIONS_SUBTITLE}</Text>
-          </View>
-          <TouchableOpacity style={styles.markReadButton} activeOpacity={0.8}>
-            <Text style={styles.markReadText}>{MARK_ALL_READ}</Text>
-          </TouchableOpacity>
-        </View>
-
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <AppHeader title={NOTIFICATIONS_TITLE} />
         <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filters}>
-          {FILTERS.map(filter => (
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => {
+                setRefreshing(true);
+                refresh();
+              }}
+              tintColor={PURPLE}
+            />
+          }>
+          <View style={styles.topRow}>
+            <View style={styles.topRowLeft}>
+              <Text style={styles.heading}>{NOTIFICATIONS_TITLE}</Text>
+              <Text style={styles.subtitle}>{subtitle}</Text>
+            </View>
             <TouchableOpacity
-              key={filter}
-              style={[
-                styles.filterChip,
-                activeFilter === filter && styles.filterChipActive,
-              ]}
-              onPress={() => setActiveFilter(filter)}
-              activeOpacity={0.8}>
-              <Text
-                style={[
-                  styles.filterText,
-                  activeFilter === filter && styles.filterTextActive,
-                ]}>
-                {filter}
+              style={[styles.markReadButton, unreadCount === 0 && styles.markReadButtonDisabled]}
+              activeOpacity={0.8}
+              onPress={handleMarkAllRead}
+              disabled={unreadCount === 0 || markingAllRead}>
+              <Text style={styles.markReadText}>
+                {markingAllRead ? 'Updating...' : MARK_ALL_READ}
               </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          </View>
 
-        <View style={styles.listSection}>
-          {filtered.map(item => (
-            <View key={item.id} style={styles.card}>
-              <View style={[styles.iconCircle, { backgroundColor: `${item.color}22` }]}>
-                <Icon name={item.icon} size={wp(5.2)} color={item.color} />
-              </View>
-              <View style={styles.cardContent}>
-                <View style={styles.cardTop}>
-                  <Text style={styles.cardTitle} numberOfLines={2}>
-                    {item.title}
-                  </Text>
-                  <Text style={styles.cardTime}>{item.time}</Text>
-                </View>
-                <Text style={styles.cardBody}>{item.body}</Text>
-                <View style={styles.cardFooter}>
-                  <View style={styles.typeTag}>
-                    <Text style={styles.typeTagText}>{item.type}</Text>
-                  </View>
-                  {item.unread ? <View style={styles.unreadDot} /> : null}
-                </View>
-              </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filters}>
+            {FILTERS.map(filter => (
+              <TouchableOpacity
+                key={filter}
+                style={[styles.filterChip, activeFilter === filter && styles.filterChipActive]}
+                onPress={() => setActiveFilter(filter)}
+                activeOpacity={0.8}>
+                <Text
+                  style={[styles.filterText, activeFilter === filter && styles.filterTextActive]}>
+                  {filter}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {loading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="small" color={PURPLE} />
             </View>
-          ))}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-    <AiAssistant />
+          ) : filtered.length === 0 ? (
+            <View style={styles.emptyWrap}>
+              <Icon name="bell-off" size={wp(10)} color={darkTextSecondaryColor} />
+              <Text style={styles.emptyTitle}>No notifications yet</Text>
+              <Text style={styles.emptyText}>
+                {activeFilter === 'Unread'
+                  ? 'You have read all your notifications.'
+                  : 'New chat messages and alerts will show up here.'}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.listSection}>
+              {filtered.map(item => {
+                const color = getNotificationColor(item.type);
+                const senderLabel = getSenderLabelFromTitle(item.title);
+
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.card, !item.is_read && styles.cardUnread]}
+                    activeOpacity={0.85}
+                    onPress={() => handleNotificationPress(item)}>
+                    <View style={[styles.iconCircle, { backgroundColor: `${color}22` }]}>
+                      <Icon name={getNotificationIcon(item.type)} size={wp(5.2)} color={color} />
+                    </View>
+                    <View style={styles.cardContent}>
+                      <View style={styles.cardTop}>
+                        <Text style={styles.cardTitle} numberOfLines={2}>
+                          {item.title || `Message from ${senderLabel}`}
+                        </Text>
+                        <Text style={styles.cardTime}>{formatNotificationTime(item.created_at)}</Text>
+                      </View>
+                      <Text style={styles.cardBody} numberOfLines={2}>
+                        {item.message}
+                      </Text>
+                      <View style={styles.cardFooter}>
+                        <View style={styles.typeTag}>
+                          <Text style={styles.typeTagText}>
+                            {getNotificationTypeLabel(item.type)}
+                          </Text>
+                        </View>
+                        <Text style={styles.senderText}>From {senderLabel}</Text>
+                        {!item.is_read ? <View style={styles.unreadDot} /> : null}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+      <AiAssistant />
     </View>
   );
 };
@@ -215,6 +329,9 @@ const styles = StyleSheet.create({
     paddingVertical: hp(1),
     marginTop: hp(0.3),
   },
+  markReadButtonDisabled: {
+    opacity: 0.45,
+  },
   markReadText: {
     ...style.fontSizeSmall2x,
     ...style.fontWeightThin1x,
@@ -246,6 +363,27 @@ const styles = StyleSheet.create({
     color: darkTextPrimaryColor,
     ...style.fontWeightMedium,
   },
+  loadingWrap: {
+    paddingVertical: hp(8),
+    alignItems: 'center',
+  },
+  emptyWrap: {
+    alignItems: 'center',
+    paddingVertical: hp(8),
+    gap: hp(1),
+  },
+  emptyTitle: {
+    ...style.fontSizeNormal2x,
+    ...style.fontWeightMedium,
+    color: darkTextPrimaryColor,
+  },
+  emptyText: {
+    ...style.fontSizeSmall2x,
+    color: darkTextSecondaryColor,
+    textAlign: 'center',
+    lineHeight: hp(2.4),
+    paddingHorizontal: wp(8),
+  },
   listSection: {
     gap: CARD_GAP,
   },
@@ -258,6 +396,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: wp(4),
     paddingVertical: hp(1.5),
     gap: wp(3),
+  },
+  cardUnread: {
+    borderColor: 'rgba(61, 220, 132, 0.35)',
   },
   iconCircle: {
     width: wp(11),
@@ -301,6 +442,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: wp(2),
+    flexWrap: 'wrap',
   },
   typeTag: {
     borderWidth: 1,
@@ -312,6 +454,11 @@ const styles = StyleSheet.create({
   typeTagText: {
     ...style.fontSizeSmall,
     color: darkTextSecondaryColor,
+  },
+  senderText: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+    flex: 1,
   },
   unreadDot: {
     width: wp(2.2),

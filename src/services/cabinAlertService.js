@@ -3,7 +3,6 @@ import {
   findOrCreateDirectChannel,
   sendChannelMessage,
 } from './chatService';
-import { sendPushToUser } from './pushNotificationService';
 
 export const sendCabinAlertToEmployee = async ({
   senderId,
@@ -27,22 +26,6 @@ export const sendCabinAlertToEmployee = async ({
     messageType: 'text',
     isBroadcast: false,
   });
-
-  try {
-    await sendPushToUser({
-      recipientUserId: recipientId,
-      title: capitalizeName(senderName),
-      body: message,
-      data: {
-        type: 'cabin_call',
-        senderId: String(senderId),
-        senderName: capitalizeName(senderName),
-        channelId: String(channel.id),
-      },
-    });
-  } catch {
-    // Chat message is already saved; push can fail if edge function is not deployed yet.
-  }
 
   return chatMessage;
 };

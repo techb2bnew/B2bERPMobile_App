@@ -56,6 +56,9 @@ const sendFcmMessage = async ({ token, title, body, data, badgeCount }) => {
             },
           },
           apns: {
+            headers: {
+              'apns-priority': '10',
+            },
             payload: {
               aps: {
                 sound: 'default',
@@ -83,7 +86,7 @@ Deno.serve(async req => {
   }
 
   try {
-    const { recipientUserId, title, body, data } = await req.json();
+    const { recipientUserId, title, body, data, badgeCount: clientBadgeCount } = await req.json();
 
     if (!recipientUserId || !title || !body) {
       return new Response(
@@ -116,18 +119,27 @@ Deno.serve(async req => {
       );
     }
 
-    const { count: badgeCount } = await supabase
-      .from('notifications')
-      .select('*', { count: 'exact', head: true })
-      .eq('recipient_id', recipientUserId)
-      .eq('is_read', false);
+    const parsedClientBadge = Number(clientBadgeCount);
+    let badgeCount = Number.isFinite(parsedClientBadge) && parsedClientBadge >= 0
+      ? parsedClientBadge
+      : null;
+
+    if (badgeCount === null) {
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('recipient_id', recipientUserId)
+        .eq('is_read', false);
+
+      badgeCount = count || 0;
+    }
 
     const fcmResult = await sendFcmMessage({
       token: fcmToken,
       title,
       body,
       data,
-      badgeCount: badgeCount || 0,
+      badgeCount,
     });
 
     return new Response(

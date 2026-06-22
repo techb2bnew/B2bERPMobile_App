@@ -7,6 +7,7 @@ export const sendPushToUser = async ({
   title,
   body,
   data = {},
+  badgeCount,
 }) => {
   if (!isSupabaseConfigured || !recipientUserId) {
     return { success: false, reason: 'not_configured' };
@@ -18,6 +19,7 @@ export const sendPushToUser = async ({
       title,
       body,
       data,
+      badgeCount,
     },
   });
 

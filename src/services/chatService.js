@@ -9,7 +9,11 @@ import { seedEmployeeProfileImageCacheFromProfiles } from '../hooks/useEmployeeP
 import { getLastMessagePreview } from './chatMediaService';
 import { capitalizeName } from '../utils';
 import { syncAppIconBadge } from './badgeService';
-import { markChannelNotificationsAsRead } from './notificationService';
+import {
+  fetchUnreadNotificationCount,
+  markChannelNotificationsAsRead,
+} from './notificationService';
+import { sendPushToUser } from './pushNotificationService';
 
 const CHANNELS_TABLE = 'chat_channels';
 const MEMBERS_TABLE = 'chat_channel_members';
@@ -588,6 +592,30 @@ export const sendChannelMessage = async ({
 
       if (notifError && __DEV__) {
         console.warn('[chat] Failed to insert notifications:', notifError.message || notifError);
+      }
+
+      if (!notifError && members.length > 0) {
+        const pushTitle = `New Message from ${capitalizeName(senderName || 'User')}`;
+        const pushBody = trimmed || fileName || 'Attachment';
+
+        await Promise.allSettled(
+          members.map(async member => {
+            const unreadCount = await fetchUnreadNotificationCount(member.user_id);
+
+            return sendPushToUser({
+              recipientUserId: member.user_id,
+              title: pushTitle,
+              body: pushBody,
+              badgeCount: unreadCount,
+              data: {
+                type: 'chat_message',
+                channelId: String(channelId),
+                senderId: String(senderId),
+                senderName: capitalizeName(senderName || 'User'),
+              },
+            });
+          }),
+        );
       }
     }
   } catch (err) {
