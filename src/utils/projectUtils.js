@@ -309,6 +309,16 @@ export const buildEmployeeNameMap = employees => {
   }, {});
 };
 
+export const getInProgressNextStepLabel = isEmployee =>
+  isEmployee ? 'Ready for Testing' : 'Done';
+
+export const buildInProgressConflictMessage = ({ userName, existingTask, isEmployee }) => {
+  const nextStep = getInProgressNextStepLabel(isEmployee);
+  const projectPart = existingTask?.project ? ` in project "${existingTask.project}"` : '';
+
+  return `${userName}, you already have a task in progress: "${existingTask.title}"${projectPart}. Please complete this task or move it to ${nextStep} first, only then you can start another task.`;
+};
+
 export const countOpenTasks = tasks => {
   if (!Array.isArray(tasks)) {
     return 0;

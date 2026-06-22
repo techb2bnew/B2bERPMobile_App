@@ -8,6 +8,8 @@ import { getEmployeeProfileImageUrl } from './employeeService';
 import { seedEmployeeProfileImageCacheFromProfiles } from '../hooks/useEmployeeProfileImage';
 import { getLastMessagePreview } from './chatMediaService';
 import { capitalizeName } from '../utils';
+import { syncAppIconBadge } from './badgeService';
+import { markChannelNotificationsAsRead } from './notificationService';
 
 const CHANNELS_TABLE = 'chat_channels';
 const MEMBERS_TABLE = 'chat_channel_members';
@@ -561,6 +563,39 @@ export const sendChannelMessage = async ({
     throw error;
   }
 
+  // Create database notification records for other channel members
+  try {
+    const { data: members, error: membersError } = await getSupabase()
+      .from(MEMBERS_TABLE)
+      .select('user_id')
+      .eq('channel_id', channelId)
+      .neq('user_id', senderId);
+
+    if (!membersError && members && members.length > 0) {
+      const notificationsToInsert = members.map(member => ({
+        recipient_id: member.user_id,
+        sender_id: senderId,
+        title: `New Message from ${capitalizeName(senderName || 'User')}`,
+        message: trimmed || fileName || 'Attachment',
+        type: 'chat_message',
+        reference_id: channelId,
+        is_read: false,
+      }));
+
+      const { error: notifError } = await getSupabase()
+        .from('notifications')
+        .insert(notificationsToInsert);
+
+      if (notifError && __DEV__) {
+        console.warn('[chat] Failed to insert notifications:', notifError.message || notifError);
+      }
+    }
+  } catch (err) {
+    if (__DEV__) {
+      console.warn('[chat] Error in inserting notifications:', err);
+    }
+  }
+
   const profileMap = await fetchProfilesByIds([senderId]);
   return mapMessageRow(data, profileMap);
 };
@@ -582,6 +617,14 @@ export const markChannelAsRead = async ({ channelId, userId }) => {
   if (error) {
     throw error;
   }
+
+  try {
+    await markChannelNotificationsAsRead({ channelId, userId });
+  } catch {
+    // Notification rows are best-effort; chat read state is already saved.
+  }
+
+  syncAppIconBadge(userId).catch(() => {});
 };
 
 export const fetchChannelMemberLastReadAt = async ({ channelId, userId }) => {

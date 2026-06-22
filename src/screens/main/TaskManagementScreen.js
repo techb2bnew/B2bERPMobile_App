@@ -45,6 +45,7 @@ import {
 import { style } from '../../constants/Fonts';
 import {
   createProjectTask,
+  fetchInProgressTaskForAssignee,
   fetchProjectTasksForProject,
   fetchProjectTasksForUser,
   mapProjectTaskRowToApp,
@@ -54,9 +55,10 @@ import {
   updateProjectTaskStatus,
 } from '../../services/projectTasksService';
 import { fetchAllEmployeeProfiles } from '../../services/employeeService';
+import { fetchAllProjects } from '../../services/projectsService';
 import { syncSupabaseRealtimeAuth } from '../../lib/supabase';
 import { isEmployeeUser, isTeamLeaderUser } from '../../constants/roles';
-import { buildEmployeeNameMap, normalizeAssigneeIds, rowAssignedToUserId } from '../../utils/projectUtils';
+import { buildEmployeeNameMap, buildInProgressConflictMessage, normalizeAssigneeIds, rowAssignedToUserId } from '../../utils/projectUtils';
 import { getFirstName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const TASKS_POLL_INTERVAL_MS = 5000;
@@ -140,6 +142,7 @@ const TaskManagementScreen = () => {
   const cardTouchStart = useRef({});
   const taskMetaRef = useRef({ name: '', assigneeName: '' });
   const employeeNameMapRef = useRef({});
+  const projectNameByIdRef = useRef({});
   const isSavingRef = useRef(false);
   const pendingRealtimeRefreshRef = useRef(false);
 
@@ -170,14 +173,21 @@ const TaskManagementScreen = () => {
       }
 
       try {
-        const [rows, employees] = await Promise.all([
+        const [rows, employees, allProjects] = await Promise.all([
           isReviewer
             ? fetchProjectTasksForProject(projectId)
             : fetchProjectTasksForUser(projectId, defaultAssigneeId),
           fetchAllEmployeeProfiles(),
+          fetchAllProjects(),
         ]);
         const employeeNameMap = buildEmployeeNameMap(employees);
         employeeNameMapRef.current = employeeNameMap;
+        projectNameByIdRef.current = allProjects.reduce((map, project) => {
+          if (project?.id) {
+            map[project.id] = project.name || '';
+          }
+          return map;
+        }, {});
         setEmployeeOptions(
           employees
             .filter(employee => employee?.id)
@@ -376,10 +386,58 @@ const TaskManagementScreen = () => {
     setFormVisible(true);
   };
 
+  const showInProgressConflictAlert = useCallback(
+    existingTask => {
+      const userName = user?.name || 'User';
+      Alert.alert(
+        '⚠️ Task in Progress',
+        buildInProgressConflictMessage({
+          userName,
+          existingTask,
+          isEmployee,
+        }),
+      );
+    },
+    [isEmployee, user?.name],
+  );
+
+  const findGlobalInProgressConflict = useCallback(
+    async (excludeTaskId, assigneeIds) => {
+      if (!defaultAssigneeId || !assigneeIds.includes(defaultAssigneeId)) {
+        return null;
+      }
+
+      return fetchInProgressTaskForAssignee(defaultAssigneeId, {
+        excludeTaskId,
+        projectNameById: projectNameByIdRef.current,
+      });
+    },
+    [defaultAssigneeId],
+  );
+
   const moveTaskToColumn = useCallback(
     async (taskId, newStatus) => {
       if (isEmployee && EMPLOYEE_HIDDEN_STATUSES.includes(newStatus)) {
         return;
+      }
+
+      if (newStatus === TASK_FILTER_IN_PROGRESS) {
+        const taskBeingMoved = tasks.find(task => task.id === taskId);
+        const assigneeIds = normalizeAssigneeIds(
+          taskBeingMoved?.assigneeIds,
+          taskBeingMoved?.assigneeId || defaultAssigneeId,
+        );
+
+        try {
+          const existingTask = await findGlobalInProgressConflict(taskId, assigneeIds);
+          if (existingTask) {
+            showInProgressConflictAlert(existingTask);
+            return;
+          }
+        } catch (error) {
+          Alert.alert('Check Failed', error?.message || 'Unable to verify in-progress tasks.');
+          return;
+        }
       }
 
       const previousTasks = tasks;
@@ -401,7 +459,7 @@ const TaskManagementScreen = () => {
         flushPendingRealtimeRefresh();
       }
     },
-    [flushPendingRealtimeRefresh, isEmployee, tasks],
+    [flushPendingRealtimeRefresh, findGlobalInProgressConflict, isEmployee, showInProgressConflictAlert, tasks, defaultAssigneeId, projectId],
   );
 
   const findColumnAtPoint = useCallback((x, y) => {
@@ -551,6 +609,20 @@ const TaskManagementScreen = () => {
       taskData.assigneeIds,
       taskData.assigneeId || defaultAssigneeId,
     );
+
+    if (taskData?.status === TASK_FILTER_IN_PROGRESS && assigneeIds.includes(defaultAssigneeId)) {
+      try {
+        const existingTask = await findGlobalInProgressConflict(taskData.id, assigneeIds);
+        if (existingTask) {
+          showInProgressConflictAlert(existingTask);
+          return false;
+        }
+      } catch (error) {
+        Alert.alert('Check Failed', error?.message || 'Unable to verify in-progress tasks.');
+        return false;
+      }
+    }
+
     const payload = {
       ...taskData,
       project: projectName,

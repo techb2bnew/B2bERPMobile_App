@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "776259679283",
+    "project_id": "b2berp-f45e0",
+    "storage_bucket": "b2berp-f45e0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:776259679283:android:edbf3430a3716d7f719f46",
+        "android_client_info": {
+          "package_name": "com.b2b_erp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCarl3EWzRnF11v1t1eHCzsAAC2vNLgB0k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

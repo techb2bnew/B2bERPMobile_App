@@ -3,7 +3,10 @@ import {
   getSupabase,
   syncSupabaseRealtimeAuth,
 } from '../lib/supabase';
-import { TASK_FILTER_DONE, TASK_STATUS_READY_FOR_TESTING } from '../constants/Constants';
+import {
+  TASK_FILTER_DONE,
+  TASK_STATUS_READY_FOR_TESTING,
+} from '../constants/Constants';
 import {
   formatTaskDate,
   formatTaskEstimateHours,
@@ -551,6 +554,37 @@ export const fetchOpenTaskCountsForAllProjects = async () => {
     counts[row.project_id] = (counts[row.project_id] || 0) + 1;
     return counts;
   }, {});
+};
+
+export const fetchInProgressTaskForAssignee = async (
+  assigneeId,
+  { excludeTaskId, projectNameById = {} } = {},
+) => {
+  if (!assigneeId) {
+    return null;
+  }
+
+  const { data, error } = await getSupabase()
+    .from(PROJECT_TASKS_TABLE)
+    .select('*')
+    .eq('status', 'in-progress')
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  const row = (data || []).find(
+    taskRow => rowAssignedToUserId(taskRow, assigneeId) && taskRow.id !== excludeTaskId,
+  );
+
+  if (!row) {
+    return null;
+  }
+
+  return mapProjectTaskRowToApp(row, {
+    name: projectNameById[row.project_id] || '',
+  });
 };
 
 export const fetchTasksForAssignee = async (

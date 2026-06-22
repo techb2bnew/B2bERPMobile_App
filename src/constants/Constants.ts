@@ -331,6 +331,17 @@ export const AI_PROMPT_HIRING = 'Show hiring recommendations';
 
 export const QUICK_ACTION_CALL_EMPLOYEE = 'Call Employee';
 export const QUICK_ACTION_BROADCAST_MESSAGE = 'Broadcast Message';
+export const QUICK_ACTION_CABIN_ALERT = 'Call to Cabin';
+export const CABIN_ALERT_TITLE = 'Call to Cabin';
+export const CABIN_ALERT_SELECT_LABEL = 'Select member';
+export const CABIN_ALERT_SELECT_PLACEHOLDER = 'Choose who to call in';
+export const CABIN_ALERT_SHEET_TITLE = 'Select members';
+export const CABIN_ALERT_MESSAGE_LABEL = 'Message preview';
+export const CABIN_ALERT_SEND_BUTTON = 'Send Now';
+export const CABIN_ALERT_SENDING = 'Sending...';
+export const CABIN_ALERT_SUCCESS = 'Call-in message sent successfully';
+export const CABIN_ALERT_ERROR = 'Could not send call-in message';
+export const CABIN_ALERT_EMPTY = 'No team members available';
 export const CALL_EMPLOYEE_TITLE = 'Call Employee';
 export const CALL_EMPLOYEE_SELECT_LABEL = 'Select Employee';
 export const CALL_EMPLOYEE_SELECT_PLACEHOLDER = 'Choose an employee';

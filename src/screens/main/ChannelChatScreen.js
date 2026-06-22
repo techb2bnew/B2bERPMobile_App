@@ -4,6 +4,7 @@ import {
   Alert,
   AppState,
   InteractionManager,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -15,7 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import { launchImageLibrary } from 'react-native-image-picker';
@@ -118,9 +119,11 @@ const ChannelChatScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef(null);
   const pendingAttachRef = useRef(null);
   const pickingMediaRef = useRef(false);
+  const keyboardVisibleRef = useRef(false);
 
   const {
     chatType = 'group',
@@ -361,17 +364,48 @@ const ChannelChatScreen = () => {
     });
   }, [messages, searchOpen, searchQuery]);
 
+  const scrollToBottom = useCallback((animated = true, delay = 0) => {
+    const runScroll = () => {
+      scrollRef.current?.scrollToEnd({ animated });
+    };
+
+    if (delay > 0) {
+      setTimeout(runScroll, delay);
+      return;
+    }
+
+    requestAnimationFrame(runScroll);
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, event => {
+      keyboardVisibleRef.current = true;
+      const animationDelay =
+        Platform.OS === 'ios' ? Math.max(120, event?.duration || 250) : 150;
+      scrollToBottom(true, animationDelay);
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      keyboardVisibleRef.current = false;
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [scrollToBottom]);
+
   useEffect(() => {
     if (searchOpen || messages.length === 0) {
       return;
     }
 
-    const timer = setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [messages.length, searchOpen]);
+    const delay = keyboardVisibleRef.current ? 180 : 80;
+    scrollToBottom(true, delay);
+  }, [messages.length, searchOpen, scrollToBottom]);
 
   const handleCallPeer = async () => {
     const digits = peerPhone.replace(/\D/g, '');
@@ -700,8 +734,8 @@ const ChannelChatScreen = () => {
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? hp(1) : 0}>
+        behavior={Platform.OS === 'ios' ? 'height' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}>
         {loading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="small" color={PURPLE} />
@@ -713,9 +747,10 @@ const ChannelChatScreen = () => {
             contentContainerStyle={styles.messageListContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             onContentSizeChange={() => {
               if (!searchOpen) {
-                scrollRef.current?.scrollToEnd({ animated: true });
+                scrollToBottom(true, keyboardVisibleRef.current ? 10 : 0);
               }
             }}>
             {visibleMessages.length === 0 ? (
@@ -752,6 +787,7 @@ const ChannelChatScreen = () => {
             placeholderTextColor={darkPlaceholderColor}
             multiline
             editable={!isBusy}
+            onFocus={() => scrollToBottom(true, Platform.OS === 'ios' ? 280 : 180)}
           />
           <TouchableOpacity
             style={[styles.sendButton, (!message.trim() || isBusy) && styles.sendButtonDisabled]}

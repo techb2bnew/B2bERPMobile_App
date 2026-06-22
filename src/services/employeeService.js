@@ -150,6 +150,47 @@ export const getEmployeeProfileById = async id => {
   return data;
 };
 
+export const updateEmployeeFcmToken = async (profileId, fcmToken) => {
+  if (!isSupabaseConfigured || !profileId || !fcmToken?.trim()) {
+    return null;
+  }
+
+  const { data, error } = await getSupabase()
+    .from(EMPLOYEE_PROFILES_TABLE)
+    .update({ fcm_token: fcmToken.trim() })
+    .eq('id', profileId)
+    .select('id, fcm_token')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'Failed to update FCM token');
+  }
+
+  if (__DEV__) {
+    console.log('[FCM] Saved to employee_profiles:', profileId);
+  }
+
+  return data;
+};
+
+export const getEmployeeFcmToken = async profileId => {
+  if (!isSupabaseConfigured || !profileId) {
+    return null;
+  }
+
+  const { data, error } = await getSupabase()
+    .from(EMPLOYEE_PROFILES_TABLE)
+    .select('fcm_token')
+    .eq('id', profileId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.fcm_token?.trim() || null;
+};
+
 export const getEmployeeProfileByEmail = async email => {
   if (!isSupabaseConfigured) {
     throw new Error('Supabase is not configured');

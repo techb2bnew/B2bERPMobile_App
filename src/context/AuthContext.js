@@ -6,6 +6,7 @@ import {
   getUserSession,
   saveUserSession,
 } from '../services/authStorage';
+import { syncFcmTokenForUser } from '../services/fcmTokenService';
 
 const AuthContext = createContext(null);
 
@@ -17,6 +18,11 @@ export const AuthProvider = ({ children }) => {
     await syncSupabaseRealtimeAuth();
     const session = await getUserSession();
     setUser(session);
+
+    if (session?.id) {
+      await syncFcmTokenForUser(session.id, 'session_restore');
+    }
+
     setIsLoading(false);
   }, []);
 
@@ -28,6 +34,7 @@ export const AuthProvider = ({ children }) => {
     await syncSupabaseRealtimeAuth();
     await saveUserSession(userData);
     setUser(userData);
+    await syncFcmTokenForUser(userData.id, 'login');
   }, []);
 
   const logout = useCallback(async () => {

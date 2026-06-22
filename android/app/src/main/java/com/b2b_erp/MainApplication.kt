@@ -1,6 +1,9 @@
 package com.b2b_erp
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.os.Build
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -22,6 +25,23 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    createDefaultNotificationChannel()
     loadReactNative(this)
+  }
+
+  private fun createDefaultNotificationChannel() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      return
+    }
+
+    val channel =
+      NotificationChannel(
+        "b2b_erp_default",
+        "App Notifications",
+        NotificationManager.IMPORTANCE_HIGH,
+      )
+
+    val manager = getSystemService(NotificationManager::class.java)
+    manager?.createNotificationChannel(channel)
   }
 }

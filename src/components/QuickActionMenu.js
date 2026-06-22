@@ -11,6 +11,7 @@ import AiAssistantFab from './AiAssistantFab';
 import {
   QUICK_ACTION_BROADCAST_MESSAGE,
   QUICK_ACTION_CALL_EMPLOYEE,
+  QUICK_ACTION_CABIN_ALERT,
 } from '../constants/Constants';
 import {
   darkBorderColor,
@@ -38,17 +39,34 @@ const MENU_ITEMS = [
   },
 ];
 
+const CABIN_ALERT_ITEM = {
+  id: 'cabin_alert',
+  label: QUICK_ACTION_CABIN_ALERT,
+  icon: 'bell',
+  iconColor: '#E8557A',
+  onPressKey: 'onCabinAlert',
+};
+
 const QuickActionMenu = ({
   visible,
   onClose,
   onCallEmployee,
   onBroadcastMessage,
+  onCabinAlert,
+  showCabinAlert = false,
   badgeCount = 4,
 }) => {
   const handlers = {
     onCallEmployee,
     onBroadcastMessage,
+    onCabinAlert,
   };
+
+  const menuItems = [
+    MENU_ITEMS[0],
+    ...(showCabinAlert ? [CABIN_ALERT_ITEM] : []),
+    MENU_ITEMS[1],
+  ];
 
   if (!visible) {
     return null;
@@ -72,12 +90,12 @@ const QuickActionMenu = ({
           onPress={() => {}}
           style={styles.menuWrap}>
           <View style={styles.menu}>
-            {MENU_ITEMS.map((item, index) => (
+            {menuItems.map((item, index) => (
               <TouchableOpacity
                 key={item.id}
                 style={[
                   styles.menuItem,
-                  index < MENU_ITEMS.length - 1 && styles.menuItemBorder,
+                  index < menuItems.length - 1 && styles.menuItemBorder,
                 ]}
                 onPress={() => handlers[item.onPressKey]?.()}
                 activeOpacity={0.85}>

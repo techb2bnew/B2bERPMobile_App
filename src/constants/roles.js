@@ -120,6 +120,21 @@ export const isTeamLeaderUser = user => {
   return getLoginCategoryForProfileRole(user?.role) === TEAM_LEADER_ROLE_ID;
 };
 
+export const isCeoAdminUser = user => {
+  const { selectedRoleId } = getUserRoleIds(user);
+
+  if (selectedRoleId === CEO_ADMIN_ROLE_ID) {
+    return true;
+  }
+
+  return getLoginCategoryForProfileRole(user?.role) === CEO_ADMIN_ROLE_ID;
+};
+
+export const getCabinAlertMessage = user =>
+  isCeoAdminUser(user)
+    ? 'Please come to the CEO cabin.'
+    : 'Please come to the manager cabin.';
+
 export const COMING_SOON_TITLE = 'Coming Soon';
 export const COMING_SOON_MESSAGE =
   'This role\'s features are currently under development and will be available soon. Please select Employee to continue for now.';
