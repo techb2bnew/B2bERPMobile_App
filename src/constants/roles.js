@@ -54,6 +54,7 @@ const TEAM_LEADER_PROFILE_ROLES = new Set([
   'tester',
   'team coordinator',
   'supervisor',
+  'teamlead'
 ]);
 
 const CEO_PROFILE_ROLES = new Set([

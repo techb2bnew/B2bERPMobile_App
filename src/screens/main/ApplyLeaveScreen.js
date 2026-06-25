@@ -32,9 +32,12 @@ import { style } from '../../constants/Fonts';
 import { useAuth } from '../../context/AuthContext';
 import { createRealtimeChannelName, getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 import { fetchAllEmployeeProfiles } from '../../services/employeeService';
+import { subscribeToUserNotifications } from '../../services/notificationService';
 import {
   getLoginCategoryForProfileRole,
   EMPLOYEE_ROLE_ID,
+  isReviewerUser,
+  isCeoAdminUser,
 } from '../../constants/roles';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
@@ -105,6 +108,35 @@ const MOCK_LEAVES = [
     start_time: '05:00 PM',
     end_time: '07:00 PM',
     reason: 'Personal work',
+    status: 'Approved',
+    reporting_officer: 'CEO Admin',
+    created_at: new Date(Date.now() - 86400000).toISOString(),
+  }
+];
+
+const MOCK_TEAM_LEAVES = [
+  {
+    id: 'mock-team-1',
+    employee_id: 'mock-emp-1',
+    employee_name: 'Shubham Kumar',
+    leave_type: 'Sick Leave',
+    start_date: '2026-06-26',
+    end_date: '2026-06-26',
+    days: 1,
+    reason: 'Suffering from cold and cough',
+    status: 'Pending',
+    reporting_officer: 'CEO Admin',
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'mock-team-2',
+    employee_id: 'mock-emp-2',
+    employee_name: 'Ankit Verma',
+    leave_type: 'Casual Leave',
+    start_date: '2026-06-27',
+    end_date: '2026-06-28',
+    days: 2,
+    reason: 'Urgent family function',
     status: 'Approved',
     reporting_officer: 'CEO Admin',
     created_at: new Date(Date.now() - 86400000).toISOString(),
@@ -297,11 +329,18 @@ const AnalogClockPickerModal = ({
 const ApplyLeaveScreen = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
+  const isCeo = isCeoAdminUser(user);
+  const userId = user?.id;
+  const userName = user?.name;
+  const isReviewer = isReviewerUser(user);
 
   // Navigation View State ('list' shows applied leaves, 'form' shows apply form)
   const [currentView, setCurrentView] = useState('list');
   const [leaves, setLeaves] = useState([]);
+  const [teamLeaves, setTeamLeaves] = useState([]);
+  const [activeTab, setActiveTab] = useState(isCeo ? 'approvals' : 'my_leaves');
   const [loadingLeaves, setLoadingLeaves] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
   const [selectedLeave, setSelectedLeave] = useState(null);
   const [detailModalVisible, setDetailModalVisible] = useState(false);
 
@@ -309,7 +348,8 @@ const ApplyLeaveScreen = () => {
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('All');
 
   const filteredLeaves = useMemo(() => {
-    return leaves.filter(item => {
+    const listToFilter = activeTab === 'my_leaves' ? leaves : teamLeaves;
+    return listToFilter.filter(item => {
       const itemStatusLower = String(item.status || '').toLowerCase();
       if (selectedStatusFilter === 'All') {
         return true;
@@ -322,7 +362,7 @@ const ApplyLeaveScreen = () => {
       }
       return true;
     });
-  }, [leaves, selectedStatusFilter]);
+  }, [leaves, teamLeaves, activeTab, selectedStatusFilter]);
 
   // Form Fields
   const [leaveType, setLeaveType] = useState('Sick Leave');
@@ -356,29 +396,43 @@ const ApplyLeaveScreen = () => {
       setLoadingLeaves(true);
     }
     try {
-      if (isSupabaseConfigured && user?.id) {
+      if (isSupabaseConfigured && userId) {
+        // Fetch user's own leaves
         const { data, error } = await getSupabase()
           .from('leave_requests')
           .select('*')
-          .eq('employee_id', user.id)
+          .eq('employee_id', userId)
           .order('created_at', { ascending: false });
         if (error) throw error;
         setLeaves(data || []);
+
+        // Fetch team leaves (approvals) if reviewer
+        if (isReviewer && userName) {
+          const { data: teamData, error: teamError } = await getSupabase()
+            .from('leave_requests')
+            .select('*')
+            .ilike('reporting_officer', userName)
+            .order('created_at', { ascending: false });
+          if (teamError) throw teamError;
+          setTeamLeaves(teamData || []);
+        }
       } else {
         setLeaves(MOCK_LEAVES);
+        setTeamLeaves(MOCK_TEAM_LEAVES);
       }
     } catch (err) {
       console.error('Error loading leaves:', err);
       setLeaves(MOCK_LEAVES);
+      setTeamLeaves(MOCK_TEAM_LEAVES);
     } finally {
       if (!silent) {
         setLoadingLeaves(false);
       }
     }
-  }, [user?.id]);
+  }, [userId, userName, isReviewer]);
 
   useEffect(() => {
-    if (!user?.id) return () => {};
+    if (!userId) return () => {};
 
     loadUserLeaves();
 
@@ -387,7 +441,7 @@ const ApplyLeaveScreen = () => {
     }
 
     const supabase = getSupabase();
-    const channelName = createRealtimeChannelName(`leaves-${user.id}`);
+    const channelName = createRealtimeChannelName(`leaves-${userId}`);
     
     const channel = supabase
       .channel(channelName)
@@ -401,10 +455,20 @@ const ApplyLeaveScreen = () => {
         (payload) => {
           const oldEmpId = payload.old?.employee_id;
           const newEmpId = payload.new?.employee_id;
+          const oldOfficer = payload.old?.reporting_officer;
+          const newOfficer = payload.new?.reporting_officer;
+
+          const isUserOfficer = (officerName) => {
+            if (!officerName || !userName) return false;
+            return officerName.toLowerCase().trim() === userName.toLowerCase().trim();
+          };
+
           if (
             (!oldEmpId && !newEmpId) ||
-            oldEmpId === user.id ||
-            newEmpId === user.id
+            oldEmpId === userId ||
+            newEmpId === userId ||
+            isUserOfficer(oldOfficer) ||
+            isUserOfficer(newOfficer)
           ) {
             loadUserLeaves(true);
           }
@@ -412,10 +476,70 @@ const ApplyLeaveScreen = () => {
       )
       .subscribe();
 
+    const unsubscribeNotifications = subscribeToUserNotifications(userId, () => {
+      loadUserLeaves(true);
+    });
+
     return () => {
       supabase.removeChannel(channel);
+      unsubscribeNotifications();
     };
-  }, [user?.id, loadUserLeaves]);
+  }, [userId, userName, loadUserLeaves]);
+
+  const handleUpdateLeaveStatus = async (leaveId, newStatus) => {
+    setUpdatingStatus(true);
+    try {
+      if (isSupabaseConfigured) {
+        // 1. Update the status in leave_requests
+        const { error } = await getSupabase()
+          .from('leave_requests')
+          .update({ status: newStatus })
+          .eq('id', leaveId);
+        
+        if (error) throw error;
+
+        // 2. Fetch the leave details to get the applicant's employee_id
+        const leaveToUpdate = teamLeaves.find(l => l.id === leaveId) || leaves.find(l => l.id === leaveId);
+        const applicantId = leaveToUpdate ? leaveToUpdate.employee_id : null;
+        const leaveTypeVal = leaveToUpdate ? leaveToUpdate.leave_type : 'Leave';
+
+        // 3. Send a notification to the applicant
+        if (applicantId) {
+          const notifMessage = `Your request for ${leaveTypeVal} has been ${newStatus.toLowerCase()} by ${user?.name || 'your reporting officer'}.`;
+          
+          const { error: notifErr } = await getSupabase()
+            .from('notifications')
+            .insert({
+              recipient_id: applicantId,
+              sender_id: user?.id || 'unknown',
+              title: `Leave Request ${newStatus}`,
+              message: notifMessage,
+              type: 'leave_status',
+              reference_id: leaveId,
+              is_read: false,
+            });
+            
+          if (notifErr && __DEV__) {
+            console.warn('Failed to insert leave status notification:', notifErr);
+          }
+        }
+      } else {
+        // Local state fallback for mock testing
+        setTeamLeaves(prev => prev.map(l => l.id === leaveId ? { ...l, status: newStatus } : l));
+        setLeaves(prev => prev.map(l => l.id === leaveId ? { ...l, status: newStatus } : l));
+      }
+
+      // Close the detail modal
+      setDetailModalVisible(false);
+      
+      // Reload lists
+      loadUserLeaves(true);
+    } catch (e) {
+      console.error('Error updating leave status:', e);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
 
   const loadOfficers = useCallback(async () => {
     try {
@@ -427,7 +551,8 @@ const ApplyLeaveScreen = () => {
         
         return (
           appRole !== EMPLOYEE_ROLE_ID &&
-          category !== EMPLOYEE_ROLE_ID
+          category !== EMPLOYEE_ROLE_ID &&
+          emp.id !== userId
         );
       });
 
@@ -445,7 +570,7 @@ const ApplyLeaveScreen = () => {
       setReportingOfficers(['Aryn Rosshan (Sam)', 'Rakesh Roshan ', 'ArshPreet','Vineet']);
       setReportingTo(prev => prev || 'Saurabh Bhatia');
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     loadOfficers();
@@ -740,6 +865,21 @@ const ApplyLeaveScreen = () => {
     return marked;
   }, [calendarMode, calendarTarget, singleDate, startDate, endDate]);
 
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }, []);
+
+  const minDate = useMemo(() => {
+    if (calendarTarget === 'end') {
+      return startDate || todayStr;
+    }
+    return todayStr;
+  }, [calendarTarget, startDate, todayStr]);
+
   const calendarTheme = {
     backgroundColor: darkSurfaceColor,
     calendarBackground: darkSurfaceColor,
@@ -780,9 +920,38 @@ const ApplyLeaveScreen = () => {
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}>
             
+            {isReviewerUser(user) && !isCeo && (
+              <View style={styles.tabContainer}>
+                <TouchableOpacity
+                  style={[styles.tabButton, activeTab === 'my_leaves' && styles.tabButtonActive]}
+                  onPress={() => {
+                    setActiveTab('my_leaves');
+                    setSelectedStatusFilter('All');
+                  }}
+                  activeOpacity={0.8}>
+                  <Text style={[styles.tabButtonText, activeTab === 'my_leaves' && styles.tabButtonTextActive]}>
+                    My Requests
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tabButton, activeTab === 'approvals' && styles.tabButtonActive]}
+                  onPress={() => {
+                    setActiveTab('approvals');
+                    setSelectedStatusFilter('All');
+                  }}
+                  activeOpacity={0.8}>
+                  <Text style={[styles.tabButtonText, activeTab === 'approvals' && styles.tabButtonTextActive]}>
+                    Approvals
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
             <View style={styles.listHeader}>
-              <Text style={styles.listHeaderTitle}>My Requests</Text>
-              {!loadingLeaves && leaves.length > 0 && (
+              <Text style={styles.listHeaderTitle}>
+                {activeTab === 'my_leaves' ? 'My Requests' : 'Approvals'}
+              </Text>
+              {activeTab === 'my_leaves' && !loadingLeaves && leaves.length > 0 && (
                 <TouchableOpacity
                   style={styles.applyNewBtn}
                   onPress={() => setCurrentView('form')}
@@ -793,7 +962,7 @@ const ApplyLeaveScreen = () => {
               )}
             </View>
 
-            {!loadingLeaves && leaves.length > 0 && (
+            {!loadingLeaves && (activeTab === 'my_leaves' ? leaves : teamLeaves).length > 0 && (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -837,21 +1006,31 @@ const ApplyLeaveScreen = () => {
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color={PURPLE} />
               </View>
-            ) : leaves.length === 0 ? (
+            ) : (activeTab === 'my_leaves' ? leaves : teamLeaves).length === 0 ? (
               <View style={styles.emptyContainer}>
                 <View style={styles.emptyIconContainer}>
-                  <Icon name="file-text" size={wp(14)} color="rgba(255,255,255,0.2)" />
+                  <Icon 
+                    name={activeTab === 'my_leaves' ? "file-text" : "check-square"} 
+                    size={wp(14)} 
+                    color="rgba(255,255,255,0.2)" 
+                  />
                 </View>
-                <Text style={styles.emptyTitle}>No Leaves Found</Text>
-                <Text style={styles.emptySubtitle}>
-                  You have not applied for any leaves yet.
+                <Text style={styles.emptyTitle}>
+                  {activeTab === 'my_leaves' ? 'No Leaves Found' : 'No Approvals Found'}
                 </Text>
-                <CommonButton
-                  title="Apply Leave"
-                  onPress={() => setCurrentView('form')}
-                  style={styles.emptyApplyBtn}
-                  textStyle={styles.submitBtnText}
-                />
+                <Text style={styles.emptySubtitle}>
+                  {activeTab === 'my_leaves' 
+                    ? 'You have not applied for any leaves yet.' 
+                    : 'You do not have any leave requests assigned to you for review.'}
+                </Text>
+                {activeTab === 'my_leaves' && (
+                  <CommonButton
+                    title="Apply Leave"
+                    onPress={() => setCurrentView('form')}
+                    style={styles.emptyApplyBtn}
+                    textStyle={styles.submitBtnText}
+                  />
+                )}
               </View>
             ) : filteredLeaves.length === 0 ? (
               <View style={styles.noFilterResultsContainer}>
@@ -929,7 +1108,12 @@ const ApplyLeaveScreen = () => {
                     <View style={styles.cardRow}>
                       <Icon name="user" size={wp(4)} color={darkTextSecondaryColor} />
                       <Text style={styles.cardText}>
-                        Reporting: <Text style={styles.cardBoldText}>{item.reporting_officer || 'CEO Admin'}</Text>
+                        {activeTab === 'my_leaves' ? 'Reporting: ' : 'Applied By: '}
+                        <Text style={styles.cardBoldText}>
+                          {activeTab === 'my_leaves' 
+                            ? (item.reporting_officer || 'CEO Admin') 
+                            : (item.employee_name || 'Employee')}
+                        </Text>
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -1170,6 +1354,7 @@ const ApplyLeaveScreen = () => {
               markingType="default"
               markedDates={markedDates}
               onDayPress={(day) => handleDateSelect(day.dateString)}
+              minDate={minDate}
               enableSwipeMonths
               theme={calendarTheme}
               style={styles.calendar}
@@ -1291,79 +1476,105 @@ const ApplyLeaveScreen = () => {
               </View>
 
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.detailScrollContent}>
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Leave Category</Text>
-                  <Text style={styles.detailValue}>{selectedLeave.leave_type}</Text>
+                {/* Row 1: Applied By / Reporting Officer & Category */}
+                <View style={styles.detailGridRow}>
+                  {activeTab === 'approvals' ? (
+                    <View style={styles.detailGridCol}>
+                      <Text style={styles.detailLabel}>Applied By</Text>
+                      <Text style={styles.detailValue}>{selectedLeave.employee_name || 'Employee'}</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.detailGridCol}>
+                      <Text style={styles.detailLabel}>Reporting Officer</Text>
+                      <Text style={styles.detailValue}>{selectedLeave.reporting_officer || 'CEO Admin'}</Text>
+                    </View>
+                  )}
+
+                  <View style={styles.detailGridCol}>
+                    <Text style={styles.detailLabel}>Category</Text>
+                    <Text style={styles.detailValue}>{selectedLeave.leave_type}</Text>
+                  </View>
                 </View>
 
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Status</Text>
-                  <View style={styles.detailStatusContainer}>
-                    <View style={[
-                      styles.statusBadge,
-                      selectedLeave.status === 'Pending' ? styles.statusBadgePending :
-                      String(selectedLeave.status || '').toLowerCase().startsWith('app') ? styles.statusBadgeApproved :
-                      styles.statusBadgeRejected
-                    ]}>
-                      <Text style={[
-                        styles.statusText,
-                        selectedLeave.status === 'Pending' ? styles.statusTextPending :
-                        String(selectedLeave.status || '').toLowerCase().startsWith('app') ? styles.statusTextApproved :
-                        styles.statusTextRejected
+                {/* Row 2: Status & Duration */}
+                <View style={styles.detailGridRow}>
+                  <View style={styles.detailGridCol}>
+                    <Text style={styles.detailLabel}>Status</Text>
+                    <View style={styles.detailStatusContainer}>
+                      <View style={[
+                        styles.statusBadge,
+                        selectedLeave.status === 'Pending' ? styles.statusBadgePending :
+                        String(selectedLeave.status || '').toLowerCase().startsWith('app') ? styles.statusBadgeApproved :
+                        styles.statusBadgeRejected
                       ]}>
-                        {selectedLeave.status || 'Pending'}
-                      </Text>
+                        <Text style={[
+                          styles.statusText,
+                          selectedLeave.status === 'Pending' ? styles.statusTextPending :
+                          String(selectedLeave.status || '').toLowerCase().startsWith('app') ? styles.statusTextApproved :
+                          styles.statusTextRejected
+                        ]}>
+                          {selectedLeave.status || 'Pending'}
+                        </Text>
+                      </View>
                     </View>
                   </View>
+
+                  <View style={styles.detailGridCol}>
+                    <Text style={styles.detailLabel}>Duration</Text>
+                    <Text style={styles.detailValue}>
+                      {isRangeType(selectedLeave.leave_type) ? (
+                        `${formatDateDisplay(selectedLeave.start_date)} - ${formatDateDisplay(selectedLeave.end_date)}`
+                      ) : (
+                        formatDateDisplay(selectedLeave.start_date)
+                      )}
+                    </Text>
+                  </View>
                 </View>
 
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Duration</Text>
-                  <Text style={styles.detailValue}>
-                    {isRangeType(selectedLeave.leave_type) ? (
-                      `${formatDateDisplay(selectedLeave.start_date)} - ${formatDateDisplay(selectedLeave.end_date)}`
+                {/* Row 3: Extra Info & Reporting Officer (if approvals) */}
+                {(selectedLeave.days > 0 || selectedLeave.start_time || selectedLeave.half_day_type || activeTab === 'approvals') && (
+                  <View style={styles.detailGridRow}>
+                    <View style={styles.detailGridCol}>
+                      {isRangeType(selectedLeave.leave_type) && selectedLeave.days > 0 ? (
+                        <>
+                          <Text style={styles.detailLabel}>Total Days</Text>
+                          <Text style={styles.detailValue}>
+                            {selectedLeave.days} {selectedLeave.days === 1 ? 'Day' : 'Days'}
+                          </Text>
+                        </>
+                      ) : selectedLeave.leave_type === 'Short Leave' && selectedLeave.start_time ? (
+                        <>
+                          <Text style={styles.detailLabel}>Time Slot</Text>
+                          <Text style={styles.detailValue}>
+                            {selectedLeave.start_time} - {selectedLeave.end_time}
+                          </Text>
+                        </>
+                      ) : selectedLeave.leave_type === 'Half Day' && selectedLeave.half_day_type ? (
+                        <>
+                          <Text style={styles.detailLabel}>Half Day Shift</Text>
+                          <Text style={styles.detailValue}>
+                            {selectedLeave.half_day_type === 'first_half' ? 'First Half' : 'Second Half'}
+                          </Text>
+                        </>
+                      ) : (
+                        <View />
+                      )}
+                    </View>
+
+                    {activeTab === 'approvals' ? (
+                      <View style={styles.detailGridCol}>
+                        <Text style={styles.detailLabel}>Reporting Officer</Text>
+                        <Text style={styles.detailValue}>{selectedLeave.reporting_officer || 'CEO Admin'}</Text>
+                      </View>
                     ) : (
-                      formatDateDisplay(selectedLeave.start_date)
+                      <View style={styles.detailGridCol} />
                     )}
-                  </Text>
-                </View>
-
-                {isRangeType(selectedLeave.leave_type) && selectedLeave.days > 0 && (
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Total Days</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedLeave.days} {selectedLeave.days === 1 ? 'Day' : 'Days'}
-                    </Text>
                   </View>
                 )}
 
-                {selectedLeave.leave_type === 'Short Leave' && selectedLeave.start_time && (
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Time Slot</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedLeave.start_time} - {selectedLeave.end_time}
-                    </Text>
-                  </View>
-                )}
-
-                {selectedLeave.leave_type === 'Half Day' && selectedLeave.half_day_type && (
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailLabel}>Half Day Shift</Text>
-                    <Text style={styles.detailValue}>
-                      {selectedLeave.half_day_type === 'first_half' ? 'First Half' : 'Second Half'}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailLabel}>Reporting Officer</Text>
-                  <Text style={styles.detailValue}>
-                    {selectedLeave.reporting_officer || 'CEO Admin'}
-                  </Text>
-                </View>
-
+                {/* Reason (Full width) */}
                 {selectedLeave.reason ? (
-                  <View style={styles.detailSection}>
+                  <View style={styles.detailSectionFull}>
                     <Text style={styles.detailLabel}>Reason for Leave</Text>
                     <View style={styles.detailReasonBox}>
                       <Text style={styles.detailReasonText}>{selectedLeave.reason}</Text>
@@ -1371,8 +1582,9 @@ const ApplyLeaveScreen = () => {
                   </View>
                 ) : null}
 
+                {/* Applied On (Full width) */}
                 {selectedLeave.created_at && (
-                  <View style={styles.detailSection}>
+                  <View style={styles.detailSectionFull}>
                     <Text style={styles.detailLabel}>Applied On</Text>
                     <Text style={[styles.detailValue, { fontSize: wp(3.8), color: darkTextSecondaryColor }]}>
                       {new Date(selectedLeave.created_at).toLocaleString('en-US', {
@@ -1388,12 +1600,35 @@ const ApplyLeaveScreen = () => {
                 )}
               </ScrollView>
 
-              <CommonButton
-                title="Close"
-                onPress={() => setDetailModalVisible(false)}
-                style={styles.detailCloseBtn}
-                textStyle={styles.submitBtnText}
-              />
+              {activeTab === 'approvals' && String(selectedLeave.status || '').toLowerCase() === 'pending' ? (
+                <View style={styles.approvalActionsRow}>
+                  <TouchableOpacity
+                    style={[styles.approvalBtn, styles.rejectBtn]}
+                    onPress={() => handleUpdateLeaveStatus(selectedLeave.id, 'Rejected')}
+                    disabled={updatingStatus}
+                    activeOpacity={0.8}>
+                    <Text style={styles.approvalBtnText}>Reject</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.approvalBtn, styles.approveBtn]}
+                    onPress={() => handleUpdateLeaveStatus(selectedLeave.id, 'Approved')}
+                    disabled={updatingStatus}
+                    activeOpacity={0.8}>
+                    {updatingStatus ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <Text style={styles.approvalBtnText}>Approve</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <CommonButton
+                  title="Close"
+                  onPress={() => setDetailModalVisible(false)}
+                  style={styles.detailCloseBtn}
+                  textStyle={styles.submitBtnText}
+                />
+              )}
             </View>
           )}
         </View>
@@ -2113,5 +2348,69 @@ const styles = StyleSheet.create({
   statusChipActiveRejected: {
     backgroundColor: '#E74C3C',
     borderColor: '#E74C3C',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: wp(3),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    padding: wp(1),
+    marginBottom: hp(2.2),
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: hp(1.2),
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: wp(2.2),
+  },
+  tabButtonActive: {
+    backgroundColor: 'rgba(155, 89, 182, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(155, 89, 182, 0.3)',
+  },
+  tabButtonText: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium,
+    color: darkTextSecondaryColor,
+  },
+  tabButtonTextActive: {
+    color: '#ffffff',
+  },
+  approvalActionsRow: {
+    flexDirection: 'row',
+    gap: wp(3),
+    marginTop: hp(2.5),
+  },
+  approvalBtn: {
+    flex: 1,
+    height: hp(5.6),
+    borderRadius: wp(2.5),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  approveBtn: {
+    backgroundColor: '#2ECC71',
+  },
+  rejectBtn: {
+    backgroundColor: '#E74C3C',
+  },
+  approvalBtnText: {
+    ...style.fontSizeNormal2x,
+    ...style.fontWeightMedium1x,
+    color: '#ffffff',
+  },
+  detailGridRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: hp(1.8),
+    gap: wp(4),
+  },
+  detailGridCol: {
+    flex: 1,
+  },
+  detailSectionFull: {
+    marginBottom: hp(1.8),
   },
 });

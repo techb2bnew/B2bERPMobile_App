@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import AiAssistantFab from './AiAssistantFab';
 // import AiAssistantModal from './Modal/AiAssistantModal';
 import CallEmployeeModal from './Modal/CallEmployeeModal';
@@ -7,7 +7,7 @@ import CabinAlertModal from './Modal/CabinAlertModal';
 import QuickActionMenu from './QuickActionMenu';
 import { MAIN_ROUTES } from '../navigation/routes';
 import { useAuth } from '../context/AuthContext';
-import { isEmployeeUser, isReviewerUser } from '../constants/roles';
+import { isEmployeeUser, isReviewerUser, isTeamLeaderUser } from '../constants/roles';
 
 const AiAssistant = ({ badgeCount = 4 }) => {
   const navigation = useNavigation();
@@ -17,8 +17,13 @@ const AiAssistant = ({ badgeCount = 4 }) => {
   const [cabinAlertVisible, setCabinAlertVisible] = useState(false);
   // const [chatVisible, setChatVisible] = useState(false);
 
+  const route = useRoute();
+
   const showCabinAlert = useMemo(() => isReviewerUser(user), [user]);
-  const showApplyLeave = useMemo(() => isEmployeeUser(user), [user]);
+  const showApplyLeave = useMemo(() => {
+    const canApply = isEmployeeUser(user) || isTeamLeaderUser(user);
+    return canApply && route.name !== MAIN_ROUTES.APPLY_LEAVE;
+  }, [user, route.name]);
 
   const handleFabPress = () => {
     setMenuVisible(true);

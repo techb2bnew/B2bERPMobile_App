@@ -17,7 +17,7 @@ import { useAuth } from '../context/AuthContext';
 import { useDrawer } from '../context/DrawerContext';
 import { LOGO_IMAGE } from '../assets/images';
 import ConfirmModal from './Modal/ConfirmModal';
-import { COMMAND_CENTER_VERSION, isEmployeeUser } from '../constants/roles';
+import { COMMAND_CENTER_VERSION, isEmployeeUser, isTeamLeaderUser, isCeoAdminUser } from '../constants/roles';
 import {
   CHAT_LABEL,
   LOGOUT_CANCEL,
@@ -72,28 +72,30 @@ const CustomDrawer = () => {
   const { user, logout } = useAuth();
   const { isOpen, closeDrawer, activeRoute, setActiveRoute } = useDrawer();
 
-  const isEmployee = isEmployeeUser(user);
+  const canShowLeaves = isEmployeeUser(user) || isTeamLeaderUser(user) || isCeoAdminUser(user);
+  const isCeo = isCeoAdminUser(user);
 
   const menuItems = useMemo(() => {
     const items = [...MENU_ITEMS];
-    if (isEmployee) {
+    if (canShowLeaves) {
       const profileIndex = items.findIndex(item => item.route === MAIN_ROUTES.PROFILE);
+      const leaveLabel = isCeo ? 'Leaves' : 'Apply Leave';
       if (profileIndex !== -1) {
         items.splice(profileIndex, 0, {
           route: MAIN_ROUTES.APPLY_LEAVE,
-          label: 'Apply Leave',
+          label: leaveLabel,
           icon: 'calendar',
         });
       } else {
         items.push({
           route: MAIN_ROUTES.APPLY_LEAVE,
-          label: 'Apply Leave',
+          label: leaveLabel,
           icon: 'calendar',
         });
       }
     }
     return items;
-  }, [isEmployee]);
+  }, [canShowLeaves, isCeo]);
 
   const drawerWidth = getDrawerWidth();
   const slideAnim = useRef(new Animated.Value(-drawerWidth)).current;

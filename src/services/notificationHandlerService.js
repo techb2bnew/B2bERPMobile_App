@@ -19,6 +19,13 @@ export const handleNotificationClick = async remoteMessage => {
 
   const data = remoteMessage.data || {};
   const channelId = data?.channelId || data?.channel_id;
+  const type = data?.type;
+
+  if (['leave_request', 'leave_status'].includes(type)) {
+    navigate(MAIN_ROUTES.APPLY_LEAVE);
+    return;
+  }
+
   const session = await getUserSession().catch(() => null);
 
   if (channelId && session?.id) {

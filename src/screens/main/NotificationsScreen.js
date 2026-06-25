@@ -168,6 +168,8 @@ const NotificationsScreen = () => {
         chatName: getSenderLabelFromTitle(item.title),
         peerId: item.sender_id,
       });
+    } else if (['leave_request', 'leave_status'].includes(item.type)) {
+      navigation.navigate(MAIN_ROUTES.APPLY_LEAVE);
     }
   };
 
