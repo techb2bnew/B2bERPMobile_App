@@ -97,7 +97,7 @@ export const fetchAllEmployeeProfiles = async () => {
 
   const { data, error } = await getSupabase()
     .from(EMPLOYEE_PROFILES_TABLE)
-    .select('id, name, email, phone, profile_image_url, avatar')
+    .select('id, name, email, phone, role, app_role, profile_image_url, avatar')
     .order('name');
 
   if (error) {
@@ -285,7 +285,7 @@ export const loginEmployee = async ({ email, password, selectedRole }) => {
   }
 
   const selectedRoleId = selectedRole?.id || '';
-  if (!profileMatchesLoginRole(profile.role, selectedRoleId)) {
+  if (!profileMatchesLoginRole(profile.app_role, selectedRoleId)) {
     await signOut();
     throw new Error(LOGIN_ROLE_MISMATCH_MESSAGE);
   }

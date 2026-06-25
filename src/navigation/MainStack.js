@@ -13,6 +13,7 @@ import TaskManagementScreen from '../screens/main/TaskManagementScreen';
 import NotificationsScreen from '../screens/main/NotificationsScreen';
 import TimeSheetScreen from '../screens/main/TimeSheetScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
+import ApplyLeaveScreen from '../screens/main/ApplyLeaveScreen';
 import { MAIN_ROUTES } from './routes';
 
 const Stack = createNativeStackNavigator();
@@ -73,6 +74,11 @@ const MainStackNavigator = () => {
           name={MAIN_ROUTES.PROFILE}
           component={ProfileScreen}
           listeners={focusListener(MAIN_ROUTES.PROFILE, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.APPLY_LEAVE}
+          component={ApplyLeaveScreen}
+          listeners={focusListener(MAIN_ROUTES.APPLY_LEAVE, setActiveRoute)}
         />
       </Stack.Navigator>
       <CustomDrawer />

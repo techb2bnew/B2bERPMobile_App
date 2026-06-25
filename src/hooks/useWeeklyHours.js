@@ -91,7 +91,7 @@ export const useWeeklyHours = employeeId => {
     }
 
     loadWeeklyHours({ silent: true });
-  }, [employeeId, isClockedIn, elapsedSeconds, loadWeeklyHours]);
+  }, [employeeId, isClockedIn, loadWeeklyHours]);
 
   useEffect(() => {
     if (!employeeId) {

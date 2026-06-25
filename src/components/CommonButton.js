@@ -10,6 +10,7 @@ import {
   darkBackgroundColor,
   darkBorderColor,
   darkSurfaceColor,
+  darkTextPrimaryColor,
   whiteColor,
 } from '../constants/Color';
 import { style, spacings } from '../constants/Fonts';

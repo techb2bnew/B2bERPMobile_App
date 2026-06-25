@@ -40,7 +40,7 @@ const DropdownSelect = ({
     closeMenu();
   };
 
-  const sheetHeight = Math.min(hp(42), hp(8) + options.length * hp(5.8) + hp(10));
+  const sheetHeight = Math.min(hp(65), hp(8) + options.length * hp(5.8) + hp(10));
 
   return (
     <View style={[styles.field, containerStyle]}>

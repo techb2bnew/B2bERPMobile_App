@@ -15,4 +15,5 @@ export const MAIN_ROUTES = {
   CHAT: 'Chat',
   CHANNEL_CHAT: 'ChannelChat',
   PROFILE: 'Profile',
+  APPLY_LEAVE: 'ApplyLeave',
 };

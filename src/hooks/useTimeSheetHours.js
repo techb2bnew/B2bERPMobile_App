@@ -7,7 +7,9 @@ import {
   formatWorkHours,
   getCurrentWeekRange,
   getLocalDateKey,
+  subscribeToEmployeeClockSessions,
 } from '../services/clockSessionsService';
+import { syncSupabaseRealtimeAuth } from '../lib/supabase';
 
 const buildEmptyRangeData = (startDateKey, endDateKey) => ({
   days: [],
@@ -112,7 +114,21 @@ export const useTimeSheetHours = (employeeId, dateRange) => {
     }
 
     loadRangeHours();
-  }, [employeeId, isClockedIn, elapsedSeconds, loadRangeHours]);
+  }, [employeeId, isClockedIn, loadRangeHours]);
+
+  useEffect(() => {
+    if (!employeeId) {
+      return undefined;
+    }
+
+    syncSupabaseRealtimeAuth().catch(() => {});
+
+    const unsubscribe = subscribeToEmployeeClockSessions(employeeId, () => {
+      loadRangeHours();
+    });
+
+    return unsubscribe;
+  }, [employeeId, loadRangeHours]);
 
   const currentWeek = getCurrentWeekRange();
   const isCurrentWeek =

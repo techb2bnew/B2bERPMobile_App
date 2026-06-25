@@ -47,24 +47,36 @@ const CABIN_ALERT_ITEM = {
   onPressKey: 'onCabinAlert',
 };
 
+const APPLY_LEAVE_ITEM = {
+  id: 'apply_leave',
+  label: 'Apply Leave',
+  icon: 'calendar',
+  iconColor: '#9B59B6',
+  onPressKey: 'onApplyLeave',
+};
+
 const QuickActionMenu = ({
   visible,
   onClose,
   onCallEmployee,
   onBroadcastMessage,
   onCabinAlert,
+  onApplyLeave,
   showCabinAlert = false,
+  showApplyLeave = false,
   badgeCount = 4,
 }) => {
   const handlers = {
     onCallEmployee,
     onBroadcastMessage,
     onCabinAlert,
+    onApplyLeave,
   };
 
   const menuItems = [
     MENU_ITEMS[0],
     ...(showCabinAlert ? [CABIN_ALERT_ITEM] : []),
+    ...(showApplyLeave ? [APPLY_LEAVE_ITEM] : []),
     MENU_ITEMS[1],
   ];
 

@@ -7,7 +7,7 @@ import CabinAlertModal from './Modal/CabinAlertModal';
 import QuickActionMenu from './QuickActionMenu';
 import { MAIN_ROUTES } from '../navigation/routes';
 import { useAuth } from '../context/AuthContext';
-import { isReviewerUser } from '../constants/roles';
+import { isEmployeeUser, isReviewerUser } from '../constants/roles';
 
 const AiAssistant = ({ badgeCount = 4 }) => {
   const navigation = useNavigation();
@@ -18,6 +18,7 @@ const AiAssistant = ({ badgeCount = 4 }) => {
   // const [chatVisible, setChatVisible] = useState(false);
 
   const showCabinAlert = useMemo(() => isReviewerUser(user), [user]);
+  const showApplyLeave = useMemo(() => isEmployeeUser(user), [user]);
 
   const handleFabPress = () => {
     setMenuVisible(true);
@@ -38,6 +39,11 @@ const AiAssistant = ({ badgeCount = 4 }) => {
     setCabinAlertVisible(true);
   };
 
+  const handleApplyLeave = () => {
+    setMenuVisible(false);
+    navigation.navigate(MAIN_ROUTES.APPLY_LEAVE);
+  };
+
   return (
     <>
       {!menuVisible ? (
@@ -50,7 +56,9 @@ const AiAssistant = ({ badgeCount = 4 }) => {
         onCallEmployee={handleCallEmployee}
         onBroadcastMessage={handleBroadcastMessage}
         onCabinAlert={handleCabinAlert}
+        onApplyLeave={handleApplyLeave}
         showCabinAlert={showCabinAlert}
+        showApplyLeave={showApplyLeave}
         badgeCount={badgeCount}
       />
 

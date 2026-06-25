@@ -29,16 +29,49 @@ const EMPLOYEE_PROFILE_ROLES = new Set([
   'developer',
   'backend developer',
   'frontend developer',
+  'digital marketer',
+  'digital marketing',
+  'marketing',
+  'designer',
+  'design',
+  'ui designer',
+  'ux designer',
+  'graphic designer',
+  'ui/ux designer',
 ]);
 
 const TEAM_LEADER_PROFILE_ROLES = new Set([
   'manager',
   'team lead',
   'team leader',
+  'project manager',
+  'technical lead',
+  'tech lead',
+  'senior developer',
+  'lead developer',
+  'qa lead',
+  'test lead',
   'tester',
+  'team coordinator',
+  'supervisor',
 ]);
 
-const CEO_PROFILE_ROLES = new Set(['ceo / admin', 'ceo admin', 'ceo/admin']);
+const CEO_PROFILE_ROLES = new Set([
+  'ceo / admin',
+  'ceo admin',
+  'ceo/admin',
+  'ceo',
+  'chief executive officer',
+  'founder',
+  'co founder',
+  'co-founder',
+  'director',
+  'managing director',
+  'owner',
+  'admin',
+  'administrator',
+  'company admin',
+]);
 
 const PROFILE_ROLE_SETS_BY_LOGIN = {
   [EMPLOYEE_ROLE_ID]: EMPLOYEE_PROFILE_ROLES,
