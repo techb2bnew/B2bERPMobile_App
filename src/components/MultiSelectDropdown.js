@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -18,11 +19,11 @@ import {
   darkTextSecondaryColor,
   whiteColor,
 } from '../constants/Color';
-import { style } from '../constants/Fonts';
+import { spacings, style } from '../constants/Fonts';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../utils';
 
 const PURPLE = '#9B59B6';
-const SHEET_HEIGHT = hp(42);
+const SHEET_HEIGHT = hp(50);
 
 const MultiSelectDropdown = ({
   label,
@@ -35,6 +36,7 @@ const MultiSelectDropdown = ({
   containerStyle,
 }) => {
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const selectedOptions = useMemo(
     () => options.filter(option => selectedIds.includes(option.id)),
@@ -54,7 +56,10 @@ const MultiSelectDropdown = ({
   }, [placeholder, selectedOptions]);
 
   const openMenu = () => setOpen(true);
-  const closeMenu = () => setOpen(false);
+  const closeMenu = () => {
+    setOpen(false);
+    setSearchQuery('');
+  };
 
   const toggleOption = optionId => {
     if (selectedIds.includes(optionId)) {
@@ -64,6 +69,12 @@ const MultiSelectDropdown = ({
 
     onChange([...selectedIds, optionId]);
   };
+
+  const filteredOptions = useMemo(() => {
+    if (!searchQuery) return options;
+    const query = searchQuery.trim().toLowerCase();
+    return options.filter(option => option.name?.toLowerCase().includes(query));
+  }, [options, searchQuery]);
 
   return (
     <View style={[styles.field, containerStyle]}>
@@ -132,39 +143,61 @@ const MultiSelectDropdown = ({
 
             <Text style={styles.sheetHint}>Tap names to select or remove</Text>
 
+            {/* Search Input Bar */}
+            <View style={styles.searchBarContainer}>
+              <Icon name="search" size={wp(4.2)} color={darkTextSecondaryColor} style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search member..."
+                placeholderTextColor={darkPlaceholderColor}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Icon name="x" size={wp(4.2)} color={darkTextSecondaryColor} />
+                </TouchableOpacity>
+              )}
+            </View>
+
             <ScrollView
               style={styles.optionsList}
               contentContainerStyle={styles.optionsListContent}
               showsVerticalScrollIndicator
               bounces={false}
               keyboardShouldPersistTaps="handled">
-              {options.map(option => {
-                const isActive = selectedIds.includes(option.id);
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={[styles.optionItem, isActive && styles.optionItemActive]}
-                    onPress={() => toggleOption(option.id)}
-                    activeOpacity={0.85}>
-                    <View style={styles.optionLeft}>
-                      <View
-                        style={[
-                          styles.checkbox,
-                          isActive && styles.checkboxActive,
-                        ]}>
-                        {isActive ? (
-                          <Icon name="check" size={wp(3.5)} color={whiteColor} />
-                        ) : null}
+              {filteredOptions.length === 0 ? (
+                <Text style={styles.noResultsText}>No members found</Text>
+              ) : (
+                filteredOptions.map(option => {
+                  const isActive = selectedIds.includes(option.id);
+                  return (
+                    <TouchableOpacity
+                      key={option.id}
+                      style={[styles.optionItem, isActive && styles.optionItemActive]}
+                      onPress={() => toggleOption(option.id)}
+                      activeOpacity={0.85}>
+                      <View style={styles.optionLeft}>
+                        <View
+                          style={[
+                            styles.checkbox,
+                            isActive && styles.checkboxActive,
+                          ]}>
+                          {isActive ? (
+                            <Icon name="check" size={wp(3.5)} color={whiteColor} />
+                          ) : null}
+                        </View>
+                        <Text
+                          style={[styles.optionText, isActive && styles.optionTextActive]}
+                          numberOfLines={1}>
+                          {option.name}
+                        </Text>
                       </View>
-                      <Text
-                        style={[styles.optionText, isActive && styles.optionTextActive]}
-                        numberOfLines={1}>
-                        {option.name}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
             </ScrollView>
 
             <TouchableOpacity
@@ -294,7 +327,7 @@ const styles = StyleSheet.create({
   },
   optionsList: {
     flex: 1,
-    maxHeight: hp(26),
+    maxHeight: hp(30),
   },
   optionsListContent: {
     paddingBottom: hp(1),
@@ -348,5 +381,30 @@ const styles = StyleSheet.create({
     ...style.fontSizeNormal,
     ...style.fontWeightMedium,
     color: whiteColor,
+  },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: darkInputBgColor,
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    paddingHorizontal: wp(3),
+    marginBottom: hp(1.2),
+  },
+  searchIcon: {
+    marginRight: wp(2),
+  },
+  searchInput: {
+    flex: 1,
+    color: darkTextPrimaryColor,
+    fontSize: style.fontSizeNormal.fontSize,
+    padding: spacings.normal,
+  },
+  noResultsText: {
+    ...style.fontSizeNormal,
+    color: darkTextSecondaryColor,
+    textAlign: 'center',
+    marginTop: hp(4),
   },
 });

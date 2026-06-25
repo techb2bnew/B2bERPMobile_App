@@ -74,6 +74,7 @@ const CustomDrawer = () => {
 
   const canShowLeaves = isEmployeeUser(user) || isTeamLeaderUser(user) || isCeoAdminUser(user);
   const isCeo = isCeoAdminUser(user);
+  const canShowShiftTracker = isTeamLeaderUser(user) || isCeoAdminUser(user);
 
   const menuItems = useMemo(() => {
     const items = [...MENU_ITEMS];
@@ -94,8 +95,24 @@ const CustomDrawer = () => {
         });
       }
     }
+    if (canShowShiftTracker) {
+      const profileIndex = items.findIndex(item => item.route === MAIN_ROUTES.PROFILE);
+      if (profileIndex !== -1) {
+        items.splice(profileIndex, 0, {
+          route: MAIN_ROUTES.SHIFT_TRACKER,
+          label: 'Shift Tracker',
+          icon: 'activity',
+        });
+      } else {
+        items.push({
+          route: MAIN_ROUTES.SHIFT_TRACKER,
+          label: 'Shift Tracker',
+          icon: 'activity',
+        });
+      }
+    }
     return items;
-  }, [canShowLeaves, isCeo]);
+  }, [canShowLeaves, isCeo, canShowShiftTracker]);
 
   const drawerWidth = getDrawerWidth();
   const slideAnim = useRef(new Animated.Value(-drawerWidth)).current;

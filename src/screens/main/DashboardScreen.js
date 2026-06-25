@@ -14,6 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import AiAssistant from '../../components/AiAssistant';
 import AppHeader from '../../components/AppHeader';
 import ClockOutReasonModal from '../../components/Modal/ClockOutReasonModal';
+import UserAvatar from '../../components/UserAvatar';
 import { useAttendance } from '../../context/AttendanceContext';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -56,8 +57,8 @@ import {
 } from '../../constants/Color';
 import { style, spacings } from '../../constants/Fonts';
 import { MAIN_ROUTES } from '../../navigation/routes';
-import { syncSupabaseRealtimeAuth } from '../../lib/supabase';
-import { isTeamLeaderUser } from '../../constants/roles';
+import { getSupabase, isSupabaseConfigured, syncSupabaseRealtimeAuth } from '../../lib/supabase';
+import { isCeoAdminUser, isReviewerUser, isTeamLeaderUser } from '../../constants/roles';
 import { fetchAllEmployeeProfiles } from '../../services/employeeService';
 import {
   fetchAllProjects,
@@ -83,6 +84,94 @@ const PURPLE = '#9B59B6';
 const CARD_RADIUS = wp(4);
 const HORIZONTAL_PAD = wp(5);
 const CARD_GAP = hp(2);
+const getSegmentColor = (kind) => {
+  switch (kind) {
+    case 'idle':
+      return '#F85149'; // Red
+    case 'break':
+      return '#F5C542'; // Yellow
+    case 'working':
+      return '#3498DB'; // Blue
+    default:
+      return '#8B949E';
+  }
+};
+
+const formatDuration = (ms) => {
+  if (!ms || ms <= 0) return '0m';
+  const diffMinutes = Math.floor(ms / 60000);
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m`;
+  }
+  const hrs = Math.floor(diffMinutes / 60);
+  const mins = diffMinutes % 60;
+  return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+};
+
+const formatTimeOfDay = (timestamp) => {
+  if (!timestamp) return 'Active';
+  const d = new Date(timestamp);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+};
+
+const renderTimelineBar = (segments) => {
+  const SHIFT_START_HOUR = 10;
+  const SHIFT_END_HOUR = 21;
+  const TOTAL_SHIFT_MS = (SHIFT_END_HOUR - SHIFT_START_HOUR) * 60 * 60 * 1000;
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const shiftStart = startOfDay.getTime() + SHIFT_START_HOUR * 60 * 60 * 1000;
+
+  if (!segments || segments.length === 0) {
+    return <View style={styles.timelineBarPlaceholder} />;
+  }
+
+  return (
+    <View style={styles.timelineContainer}>
+      {/* Hour Guide lines (10 AM to 9 PM = 11 intervals) */}
+      <View style={[styles.gridline, { left: '9.09%' }]} />
+      <View style={[styles.gridline, { left: '18.18%' }]} />
+      <View style={[styles.gridline, { left: '27.27%' }]} />
+      <View style={[styles.gridline, { left: '36.36%' }]} />
+      <View style={[styles.gridline, { left: '45.45%' }]} />
+      <View style={[styles.gridline, { left: '54.54%' }]} />
+      <View style={[styles.gridline, { left: '63.63%' }]} />
+      <View style={[styles.gridline, { left: '72.72%' }]} />
+      <View style={[styles.gridline, { left: '81.81%' }]} />
+      <View style={[styles.gridline, { left: '90.90%' }]} />
+
+      {segments.map((seg) => {
+        const segStart = new Date(seg.started_at).getTime();
+        const segEnd = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
+
+        const startOffset = Math.max(0, segStart - shiftStart);
+        const endOffset = Math.min(TOTAL_SHIFT_MS, segEnd - shiftStart);
+
+        if (startOffset >= TOTAL_SHIFT_MS || endOffset <= 0) {
+          return null;
+        }
+
+        const leftPercent = (startOffset / TOTAL_SHIFT_MS) * 100;
+        const widthPercent = ((endOffset - startOffset) / TOTAL_SHIFT_MS) * 100;
+
+        return (
+          <View
+            key={seg.id}
+            style={[
+              styles.segmentBlock,
+              {
+                left: `${leftPercent}%`,
+                width: `${widthPercent}%`,
+                backgroundColor: getSegmentColor(seg.kind),
+              },
+            ]}
+          />
+        );
+      })}
+    </View>
+  );
+};
+
 const DashboardScreen = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
@@ -103,6 +192,12 @@ const DashboardScreen = () => {
   const { weeklyData, loading: weeklyLoading } = useWeeklyHours(user?.id);
   const [todayTasks, setTodayTasks] = useState([]);
   const [tasksLoading, setTasksLoading] = useState(true);
+
+  // CEO and Manager specific states
+  const [shiftSessions, setShiftSessions] = useState([]);
+  const [shiftsLoading, setShiftsLoading] = useState(false);
+  const [recentLeaves, setRecentLeaves] = useState([]);
+  const [leavesLoading, setLeavesLoading] = useState(false);
 
   const loadTodayTasks = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -151,24 +246,187 @@ const DashboardScreen = () => {
     }
   }, [isTeamLeader, user]);
 
+  const loadDashboardShifts = useCallback(async () => {
+    if (!isCeoAdminUser(user)) return;
+    setShiftsLoading(true);
+    try {
+      if (isSupabaseConfigured) {
+        const supabase = getSupabase();
+        const today = new Date().toISOString().split('T')[0];
+        const startOfDay = `${today}T00:00:00.000Z`;
+        const endOfDay = `${today}T23:59:59.999Z`;
+
+        const { data: rawSessions, error: sessionErr } = await supabase
+          .from('clock_sessions')
+          .select('*')
+          .gte('clock_in', startOfDay)
+          .lte('clock_in', endOfDay)
+          .order('clock_in', { ascending: true });
+
+        if (sessionErr) throw sessionErr;
+
+        if (rawSessions && rawSessions.length > 0) {
+          const ids = rawSessions.map(s => s.id);
+          const { data: rawSegments, error: segmentErr } = await supabase
+            .from('clock_session_segments')
+            .select('*')
+            .in('session_id', ids)
+            .order('started_at', { ascending: true });
+
+          if (segmentErr) throw segmentErr;
+
+          const { data: rawProfiles } = await supabase
+            .from('employee_profiles')
+            .select('id, role, dept');
+
+          const profileMap = {};
+          (rawProfiles || []).forEach(p => {
+            profileMap[p.id] = p;
+          });
+
+          const mapped = rawSessions.map(session => {
+            const profile = profileMap[session.employee_id] || {};
+            return {
+              ...session,
+              employee_dept: profile.dept || 'General',
+              segments: (rawSegments || []).filter(seg => seg.session_id === session.id)
+            };
+          });
+          setShiftSessions(mapped);
+        } else {
+          setShiftSessions([]);
+        }
+      } else {
+        // Mock team sessions for offline CEO view
+        setShiftSessions([
+          {
+            id: 'mock-1',
+            employee_name: 'Shubham',
+            employee_dept: 'Development',
+            status: 'active',
+            segments: [{ kind: 'working', started_at: Date.now() - 3.5 * 3600 * 1000, ended_at: null }]
+          },
+          {
+            id: 'mock-2',
+            employee_name: 'Lakhwinder',
+            employee_dept: 'Development',
+            status: 'active',
+            segments: [{ kind: 'working', started_at: Date.now() - 3.3 * 3600 * 1000, ended_at: null }]
+          },
+          {
+            id: 'mock-3',
+            employee_name: 'Anurag Sharma',
+            employee_dept: 'Digital Marketing',
+            status: 'active',
+            segments: [{ kind: 'working', started_at: Date.now() - 3.1 * 3600 * 1000, ended_at: null }]
+          }
+        ]);
+      }
+    } catch (e) {
+      console.error('Error loading dashboard shifts:', e);
+      setShiftSessions([]);
+    } finally {
+      setShiftsLoading(false);
+    }
+  }, [user]);
+
+  const loadRecentLeaves = useCallback(async () => {
+    if (!isReviewerUser(user)) return;
+    setLeavesLoading(true);
+    try {
+      if (isSupabaseConfigured) {
+        const { data, error } = await getSupabase()
+          .from('leave_requests')
+          .select('*')
+          .ilike('reporting_officer', user?.name || '')
+          .eq('status', 'Pending')
+          .order('created_at', { ascending: false })
+          .limit(3);
+
+        if (error) throw error;
+        setRecentLeaves(data || []);
+      } else {
+        // Mock leaves for offline/testing review
+        setRecentLeaves([
+          {
+            id: 'leave-1',
+            employee_name: 'Kartik',
+            leave_type: 'Sick Leave',
+            start_date: '2026-06-26',
+            end_date: '2026-06-27',
+            reason: 'Fever and cold',
+            status: 'Pending',
+            days: 2,
+          },
+          {
+            id: 'leave-2',
+            employee_name: 'Saravjeet Singh',
+            leave_type: 'Casual Leave',
+            start_date: '2026-06-30',
+            end_date: '2026-06-30',
+            reason: 'Personal urgent work',
+            status: 'Pending',
+            days: 1,
+          }
+        ]);
+      }
+    } catch (e) {
+      console.error('Error fetching dashboard leaves:', e);
+      setRecentLeaves([]);
+    } finally {
+      setLeavesLoading(false);
+    }
+  }, [user]);
+
   useFocusEffect(
     useCallback(() => {
       let active = true;
 
-      const refresh = () => {
-        if (active) {
-          loadTodayTasks({ silent: true });
-        }
-      };
-
       loadTodayTasks();
+      if (isCeoAdminUser(user)) {
+        loadDashboardShifts();
+      }
+      if (isReviewerUser(user)) {
+        loadRecentLeaves();
+      }
       syncSupabaseRealtimeAuth().catch(() => {});
 
       return () => {
         active = false;
       };
-    }, [loadTodayTasks]),
+    }, [loadTodayTasks, loadDashboardShifts, loadRecentLeaves, user]),
   );
+
+  const ceoStats = useMemo(() => {
+    let working = 0;
+    let onBreak = 0;
+    let totalWorkMs = 0;
+
+    shiftSessions.forEach(session => {
+      if (session.status === 'active') {
+        working += 1;
+      } else if (session.status === 'paused') {
+        onBreak += 1;
+      }
+
+      (session.segments || []).forEach(seg => {
+        if (seg.kind === 'working') {
+          const start = new Date(seg.started_at).getTime();
+          const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
+          totalWorkMs += (end - start);
+        }
+      });
+    });
+
+    return {
+      working,
+      onBreak,
+      total: shiftSessions.length,
+      workTimeStr: formatDuration(totalWorkMs),
+    };
+  }, [shiftSessions]);
+
+
 
   useEffect(() => {
     if (!user?.id) {
@@ -264,6 +522,51 @@ const DashboardScreen = () => {
             {/* {DASHBOARD_LIVE_SUFFIX} */}
           </Text>
 
+          {isCeoAdminUser(user) && (
+            /* CEO Summary Grid */
+            <View style={styles.ceoOverviewGrid}>
+              <View style={styles.ceoStatCard}>
+                <View style={styles.ceoStatHeader}>
+                  <Icon name="users" size={wp(4.2)} color="#3DDC84" />
+                  <Text style={styles.ceoStatLabel}>Active Staff</Text>
+                </View>
+                <Text style={styles.ceoStatValue}>
+                  {shiftsLoading ? '--' : `${ceoStats.working} / ${ceoStats.total}`}
+                </Text>
+              </View>
+
+              <View style={styles.ceoStatCard}>
+                <View style={styles.ceoStatHeader}>
+                  <Icon name="coffee" size={wp(4.2)} color="#F5C542" />
+                  <Text style={styles.ceoStatLabel}>On Break</Text>
+                </View>
+                <Text style={styles.ceoStatValue}>
+                  {shiftsLoading ? '--' : `${ceoStats.onBreak}`}
+                </Text>
+              </View>
+
+              <View style={styles.ceoStatCard}>
+                <View style={styles.ceoStatHeader}>
+                  <Icon name="zap" size={wp(4.2)} color="#3498DB" />
+                  <Text style={styles.ceoStatLabel}>Team Work Hours</Text>
+                </View>
+                <Text style={styles.ceoStatValue}>
+                  {shiftsLoading ? '--' : ceoStats.workTimeStr}
+                </Text>
+              </View>
+
+              <View style={styles.ceoStatCard}>
+                <View style={styles.ceoStatHeader}>
+                  <Icon name="calendar" size={wp(4.2)} color={PURPLE} />
+                  <Text style={styles.ceoStatLabel}>Pending Leaves</Text>
+                </View>
+                <Text style={styles.ceoStatValue}>
+                  {leavesLoading ? '--' : `${recentLeaves.length}`}
+                </Text>
+              </View>
+            </View>
+          )}
+
           {/* <View style={styles.clockCard}>
             <View style={styles.clockLeft}>
               <Text style={styles.timer}>{formattedTime}</Text>
@@ -302,129 +605,289 @@ const DashboardScreen = () => {
             <Text style={styles.locationHint}>{CHECKING_LOCATION_TEXT}</Text>
           ) : null}
 
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <View style={styles.statHeader}>
-                <Icon name="target" size={wp(4.5)} color={PURPLE} />
-                <Text style={styles.statLabel}>{FOCUS_SCORE_LABEL}</Text>
-              </View>
-              <Text style={styles.statValue}>
-                {statsLoading ? '--' : `${focusScore}%`}
-              </Text>
-            </View>
-            <View style={styles.statCard}>
-              <View style={styles.statHeader}>
-                <Icon name="check-square" size={wp(4.5)} color={darkAccentGreenColor} />
-                <Text style={styles.statLabel}>
-                  {isTeamLeader ? DASHBOARD_TL_REVIEW_LABEL : TASKS_DONE_LABEL}
+          {!isCeoAdminUser(user) && (
+            <View style={styles.statsRow}>
+              <View style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <Icon name="target" size={wp(4.5)} color={PURPLE} />
+                  <Text style={styles.statLabel}>{FOCUS_SCORE_LABEL}</Text>
+                </View>
+                <Text style={styles.statValue}>
+                  {statsLoading ? '--' : `${focusScore}%`}
                 </Text>
               </View>
-              <Text style={styles.statValue}>
-                {statsLoading
-                  ? '--'
-                  : isTeamLeader
-                    ? `${taskStats.reviewCount}`
-                    : `${taskStats.done}/${taskStats.total}`}
-              </Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={styles.sectionCard}
-            onPress={() => navigation.navigate(MAIN_ROUTES.PROJECTS_WORK)}
-            activeOpacity={0.85}>
-            <Text style={styles.sectionTitle}>{MY_TASKS_TITLE} →</Text>
-            <Text style={styles.sectionSubtitle}>
-              {isTeamLeader ? DASHBOARD_TL_TASKS_SUBTITLE : MY_TASKS_TODAY_LABEL}
-            </Text>
-            {tasksLoading ? (
-              <ActivityIndicator size="small" color={PURPLE} style={styles.tasksLoader} />
-            ) : todayTasks.length === 0 ? (
-              <View style={styles.emptyWrap}>
-                <Text style={styles.emptyText}>
-                  {isTeamLeader ? MY_TASKS_TL_EMPTY : MY_TASKS_EMPTY}
+              <View style={styles.statCard}>
+                <View style={styles.statHeader}>
+                  <Icon name="check-square" size={wp(4.5)} color={darkAccentGreenColor} />
+                  <Text style={styles.statLabel}>
+                    {isTeamLeader ? DASHBOARD_TL_REVIEW_LABEL : TASKS_DONE_LABEL}
+                  </Text>
+                </View>
+                <Text style={styles.statValue}>
+                  {statsLoading
+                    ? '--'
+                    : isTeamLeader
+                      ? `${taskStats.reviewCount}`
+                      : `${taskStats.done}/${taskStats.total}`}
                 </Text>
               </View>
-            ) : (
-              <View style={styles.taskList}>
-                {todayTasks.map(task => {
-                  const detailLine = buildTaskDetailLine(task);
+            </View>
+          )}
 
-                  return (
-                  <TouchableOpacity
-                    key={task.id}
-                    style={styles.taskRow}
-                    activeOpacity={0.85}
-                    onPress={() =>
-                      navigation.navigate(MAIN_ROUTES.TASK_MANAGEMENT, {
-                        projectId: task.projectId,
-                        projectName: task.project,
-                      })
-                    }>
-                    <View style={styles.taskRowLeft}>
-                      <Text style={styles.taskTitle} numberOfLines={1}>
-                        {task.title}
-                      </Text>
-                      <Text style={styles.taskMeta} numberOfLines={1}>
-                        {task.project} · {task.status}
-                        {isTeamLeader && task.assignee
-                          ? ` · ${TASK_ASSIGNED_TO_LABEL}: ${task.assignee}`
-                          : ''}
-                      </Text>
-                      {detailLine ? (
-                        <Text style={styles.taskDetails} numberOfLines={2}>
-                          {detailLine}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </TouchableOpacity>
+          {isCeoAdminUser(user) ? (
+            /* Shift Tracker Widget for CEO */
+            <TouchableOpacity
+              style={styles.sectionCard}
+              onPress={() => navigation.navigate(MAIN_ROUTES.SHIFT_TRACKER)}
+              activeOpacity={0.85}>
+              <Text style={styles.sectionTitle}>Shift Tracker →</Text>
+              <Text style={styles.sectionSubtitle}>Today's active shifts</Text>
+              {shiftsLoading ? (
+                <ActivityIndicator size="small" color={PURPLE} style={styles.loaderSpacing} />
+              ) : shiftSessions.length === 0 ? (
+                <View style={styles.emptyWrap}>
+                  <Text style={styles.emptyText}>No active shifts logged today.</Text>
+                </View>
+              ) : (
+                <View style={styles.shiftWidgetList}>
+                  {shiftSessions.slice(0, 3).map(session => {
+                    let workMs = 0;
+                    (session.segments || []).forEach(seg => {
+                      if (seg.kind === 'working') {
+                        const start = new Date(seg.started_at).getTime();
+                        const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
+                        workMs += (end - start);
+                      }
+                    });
+                    
+                    let statusDotColor = '#8B949E'; // Gray (Offline)
+                    let statusText = 'Offline';
 
-          <TouchableOpacity
-            style={styles.sectionCard}
-            onPress={() => navigation.navigate(MAIN_ROUTES.TIME_SHEET)}
-            activeOpacity={0.85}>
-            <Text style={styles.sectionTitle}>{WEEKLY_HOURS_TITLE} →</Text>
-            {weeklyLoading ? (
-              <ActivityIndicator size="small" color={PURPLE} style={styles.weeklyLoader} />
-            ) : (
-              <>
-                <View style={styles.chartRow}>
-                  {weeklyData.days.map(day => (
-                    <View key={day.day} style={styles.chartItem}>
-                      <Text style={styles.chartHours}>{day.hoursLabel}</Text>
-                      <View style={styles.chartBarTrack}>
-                        <View
-                          style={[styles.chartBarFill, { width: `${day.barPercent}%` }]}
-                        />
+                    if (session.status === 'active') {
+                      const lastSeg = session.segments && session.segments[session.segments.length - 1];
+                      if (lastSeg && !lastSeg.ended_at) {
+                        if (lastSeg.kind === 'idle') {
+                          statusDotColor = '#F85149'; // Red (Not at desk)
+                          const idleMins = Math.floor((Date.now() - new Date(lastSeg.started_at).getTime()) / 60000);
+                          statusText = `Not at desk for ${idleMins}m`;
+                        } else {
+                          statusDotColor = '#3498DB'; // Blue (Clocked in)
+                          statusText = 'Clocked in';
+                        }
+                      } else {
+                        statusDotColor = '#3498DB';
+                        statusText = 'Clocked in';
+                      }
+                    } else if (session.status === 'paused') {
+                      const lastSeg = session.segments && session.segments[session.segments.length - 1];
+                      if (lastSeg && !lastSeg.ended_at) {
+                        if (lastSeg.label && lastSeg.label.toLowerCase().includes('meeting')) {
+                          statusDotColor = '#9B59B6'; // Purple (Meeting)
+                          statusText = 'Meeting';
+                        } else {
+                          statusDotColor = '#F5C542'; // Yellow (On Break)
+                          statusText = `On Break: ${lastSeg.label}`;
+                        }
+                      } else {
+                        statusDotColor = '#F5C542';
+                        statusText = 'On Break';
+                      }
+                    }
+
+                    return (
+                      <View key={session.id} style={styles.shiftWidgetRow}>
+                        <UserAvatar name={session.employee_name} size={wp(10.5)} />
+
+                        <View style={styles.employeeMeta}>
+                          <Text style={styles.employeeName} numberOfLines={1}>
+                            {session.employee_name}
+                          </Text>
+                          <Text style={styles.employeeDept} numberOfLines={1}>
+                            {session.employee_dept || 'Digital Marketing'}
+                          </Text>
+                          <View style={styles.statusRow}>
+                            <View style={[styles.statusDot, { backgroundColor: statusDotColor }]} />
+                            <Text style={styles.statusLabel} numberOfLines={1}>
+                              {statusText}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.barWrapper}>
+                          {renderTimelineBar(session.segments)}
+                          <View style={styles.rowTimeLabels}>
+                            <Text style={styles.rowTimeText}>
+                              {formatTimeOfDay(session.clock_in)}
+                            </Text>
+                            <Text style={styles.rowTimeText}>
+                              {session.clock_out ? formatTimeOfDay(session.clock_out) : 'Active'}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.productivityWrapper}>
+                          <Text style={styles.workingHoursValue}>
+                            {session.status === 'offline' || workMs === 0 ? '-' : formatDuration(workMs)}
+                          </Text>
+                          <Text style={styles.prodLabel}>Work Time</Text>
+                        </View>
                       </View>
-                      <Text style={styles.chartDay}>{day.day}</Text>
+                    );
+                  })}
+                </View>
+              )}
+            </TouchableOpacity>
+          ) : (
+            /* Today's Tasks Card for Employee & Manager */
+            <TouchableOpacity
+              style={styles.sectionCard}
+              onPress={() => navigation.navigate(MAIN_ROUTES.PROJECTS_WORK)}
+              activeOpacity={0.85}>
+              <Text style={styles.sectionTitle}>{MY_TASKS_TITLE} →</Text>
+              <Text style={styles.sectionSubtitle}>
+                {isTeamLeader ? DASHBOARD_TL_TASKS_SUBTITLE : MY_TASKS_TODAY_LABEL}
+              </Text>
+              {tasksLoading ? (
+                <ActivityIndicator size="small" color={PURPLE} style={styles.tasksLoader} />
+              ) : todayTasks.length === 0 ? (
+                <View style={styles.emptyWrap}>
+                  <Text style={styles.emptyText}>
+                    {isTeamLeader ? MY_TASKS_TL_EMPTY : MY_TASKS_EMPTY}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.taskList}>
+                  {todayTasks.map(task => {
+                    const detailLine = buildTaskDetailLine(task);
+
+                    return (
+                    <TouchableOpacity
+                      key={task.id}
+                      style={styles.taskRow}
+                      activeOpacity={0.85}
+                      onPress={() =>
+                        navigation.navigate(MAIN_ROUTES.TASK_MANAGEMENT, {
+                          projectId: task.projectId,
+                          projectName: task.project,
+                        })
+                      }>
+                      <View style={styles.taskRowLeft}>
+                        <Text style={styles.taskTitle} numberOfLines={1}>
+                          {task.title}
+                        </Text>
+                        <Text style={styles.taskMeta} numberOfLines={1}>
+                          {task.project} · {task.status}
+                          {isTeamLeader && task.assignee
+                            ? ` · ${TASK_ASSIGNED_TO_LABEL}: ${task.assignee}`
+                            : ''}
+                        </Text>
+                        {detailLine ? (
+                          <Text style={styles.taskDetails} numberOfLines={2}>
+                            {detailLine}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {!isCeoAdminUser(user) && (
+            /* Weekly Hours (Hidden for CEO, visible for Manager & Employee) */
+            <TouchableOpacity
+              style={styles.sectionCard}
+              onPress={() => navigation.navigate(MAIN_ROUTES.TIME_SHEET)}
+              activeOpacity={0.85}>
+              <Text style={styles.sectionTitle}>{WEEKLY_HOURS_TITLE} →</Text>
+              {weeklyLoading ? (
+                <ActivityIndicator size="small" color={PURPLE} style={styles.weeklyLoader} />
+              ) : (
+                <>
+                  <View style={styles.chartRow}>
+                    {weeklyData.days.map(day => (
+                      <View key={day.day} style={styles.chartItem}>
+                        <Text style={styles.chartHours}>{day.hoursLabel}</Text>
+                        <View style={styles.chartBarTrack}>
+                          <View
+                            style={[styles.chartBarFill, { width: `${day.barPercent}%` }]}
+                          />
+                        </View>
+                        <Text style={styles.chartDay}>{day.day}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={styles.summaryRow}>
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{weeklyData.totalHoursLabel}</Text>
+                      <Text style={styles.summaryLabel}>Total</Text>
                     </View>
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{weeklyData.avgHoursLabel}</Text>
+                      <Text style={styles.summaryLabel}>Avg/Day</Text>
+                    </View>
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryValue}>{weeklyData.attendanceLabel}</Text>
+                      <Text style={styles.summaryLabel}>Attendance</Text>
+                    </View>
+                  </View>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {isReviewerUser(user) && (
+            /* Pending Leave Requests Widget (For CEO & Manager) */
+            <TouchableOpacity
+              style={styles.sectionCard}
+              onPress={() => navigation.navigate(MAIN_ROUTES.APPLY_LEAVE)}
+              activeOpacity={0.85}>
+              <Text style={styles.sectionTitle}>Leave Applications →</Text>
+              <Text style={styles.sectionSubtitle}>Pending approval requests</Text>
+              
+              {leavesLoading ? (
+                <ActivityIndicator size="small" color={PURPLE} style={styles.tasksLoader} />
+              ) : recentLeaves.length === 0 ? (
+                <View style={styles.emptyWrap}>
+                  <Text style={styles.emptyText}>No pending leave requests.</Text>
+                </View>
+              ) : (
+                <View style={styles.leaveList}>
+                  {recentLeaves.map(leave => (
+                    <TouchableOpacity
+                      key={leave.id}
+                      style={styles.leaveRow}
+                      activeOpacity={0.85}
+                      onPress={() => navigation.navigate(MAIN_ROUTES.APPLY_LEAVE)}>
+                      <View style={styles.leaveRowLeft}>
+                        <View style={styles.leaveHeaderRow}>
+                          <Text style={styles.leaveEmployeeName}>{leave.employee_name}</Text>
+                          <View style={styles.leaveStatusBadge}>
+                            <Text style={styles.leaveStatusText}>Pending</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.leaveMeta}>
+                          {leave.leave_type} · {leave.days} day{leave.days > 1 ? 's' : ''}
+                        </Text>
+                        <Text style={styles.leaveDuration}>
+                          {new Date(leave.start_date).toLocaleDateString([], { day: '2-digit', month: 'short' })} → {new Date(leave.end_date).toLocaleDateString([], { day: '2-digit', month: 'short' })}
+                        </Text>
+                        {leave.reason ? (
+                          <Text style={styles.leaveReason} numberOfLines={1}>
+                            "{leave.reason}"
+                          </Text>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
-                <View style={styles.summaryRow}>
-                  <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>{weeklyData.totalHoursLabel}</Text>
-                    <Text style={styles.summaryLabel}>Total</Text>
-                  </View>
-                  <View style={styles.summaryDivider} />
-                  <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>{weeklyData.avgHoursLabel}</Text>
-                    <Text style={styles.summaryLabel}>Avg/Day</Text>
-                  </View>
-                  <View style={styles.summaryDivider} />
-                  <View style={styles.summaryItem}>
-                    <Text style={styles.summaryValue}>{weeklyData.attendanceLabel}</Text>
-                    <Text style={styles.summaryLabel}>Attendance</Text>
-                  </View>
-                </View>
-              </>
-            )}
-          </TouchableOpacity>
+              )}
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </SafeAreaView>
       <ClockOutReasonModal
@@ -691,5 +1154,194 @@ const styles = StyleSheet.create({
     ...style.fontSizeSmall,
     color: darkTextSecondaryColor,
     marginTop: hp(0.5),
+  },
+  
+  // CEO & Manager Widgets Styles
+  ceoOverviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: wp(3.2),
+    marginBottom: CARD_GAP,
+  },
+  ceoStatCard: {
+    width: wp(43.2),
+    backgroundColor: darkSurfaceColor,
+    borderRadius: CARD_RADIUS,
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    paddingHorizontal: wp(4),
+    paddingVertical: hp(1.8),
+    minHeight: hp(10),
+    justifyContent: 'space-between',
+  },
+  ceoStatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacings.small,
+  },
+  ceoStatLabel: {
+    fontSize: wp(2.6),
+    color: darkTextSecondaryColor,
+    fontWeight: '500',
+  },
+  ceoStatValue: {
+    fontSize: wp(6),
+    ...style.fontWeightBold,
+    color: darkTextPrimaryColor,
+    marginTop: hp(1),
+  },
+  loaderSpacing: {
+    marginVertical: hp(2),
+  },
+  shiftWidgetList: {
+    gap: hp(1.2),
+  },
+  shiftWidgetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: darkBackgroundColor,
+    borderRadius: wp(3),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    paddingVertical: hp(1.6),
+    paddingHorizontal: wp(3.5),
+  },
+  employeeMeta: {
+    width: wp(21),
+    paddingLeft: wp(2),
+    gap: hp(0.3),
+  },
+  employeeName: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium,
+    color: darkTextPrimaryColor,
+  },
+  employeeDept: {
+    fontSize: wp(2.7),
+    color: darkTextSecondaryColor,
+    opacity: 0.9,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(1.2),
+    marginTop: hp(0.2),
+  },
+  statusDot: {
+    width: wp(1.8),
+    height: wp(1.8),
+    borderRadius: wp(0.9),
+  },
+  statusLabel: {
+    fontSize: wp(2.8),
+    color: darkTextSecondaryColor,
+    flex: 1,
+  },
+  barWrapper: {
+    flex: 1,
+    paddingHorizontal: wp(1),
+    gap: hp(0.5),
+  },
+  rowTimeLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: wp(0.5),
+  },
+  rowTimeText: {
+    fontSize: wp(2.1),
+    color: darkTextSecondaryColor,
+    opacity: 0.8,
+  },
+  productivityWrapper: {
+    width: wp(18),
+    alignItems: 'flex-end',
+    gap: hp(0.3),
+  },
+  workingHoursValue: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium,
+    color: '#3498DB',
+  },
+  prodLabel: {
+    fontSize: wp(2.3),
+    color: darkTextSecondaryColor,
+  },
+  timelineBarPlaceholder: {
+    height: hp(1.8),
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: wp(1),
+  },
+  timelineContainer: {
+    height: hp(2.2),
+    backgroundColor: '#21262D',
+    borderRadius: wp(1.5),
+    borderWidth: 1,
+    borderColor: '#30363D',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  gridline: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  segmentBlock: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    borderRadius: wp(0.4),
+  },
+  leaveList: {
+    gap: hp(1.2),
+  },
+  leaveRow: {
+    backgroundColor: darkBackgroundColor,
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    paddingHorizontal: wp(3.5),
+    paddingVertical: hp(1.2),
+  },
+  leaveRowLeft: {
+    gap: hp(0.3),
+  },
+  leaveHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  leaveEmployeeName: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium,
+    color: darkTextPrimaryColor,
+  },
+  leaveStatusBadge: {
+    backgroundColor: 'rgba(245, 197, 66, 0.15)',
+    paddingHorizontal: wp(2),
+    paddingVertical: hp(0.3),
+    borderRadius: wp(1),
+  },
+  leaveStatusText: {
+    fontSize: wp(2.4),
+    color: '#F5C542',
+    fontWeight: '600',
+  },
+  leaveMeta: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+  },
+  leaveDuration: {
+    fontSize: wp(2.5),
+    color: darkTextSecondaryColor,
+    opacity: 0.8,
+  },
+  leaveReason: {
+    ...style.fontSizeSmall,
+    color: PURPLE,
+    fontStyle: 'italic',
+    marginTop: hp(0.2),
   },
 });

@@ -16,4 +16,5 @@ export const MAIN_ROUTES = {
   CHANNEL_CHAT: 'ChannelChat',
   PROFILE: 'Profile',
   APPLY_LEAVE: 'ApplyLeave',
+  SHIFT_TRACKER: 'ShiftTracker',
 };

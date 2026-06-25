@@ -14,6 +14,7 @@ import NotificationsScreen from '../screens/main/NotificationsScreen';
 import TimeSheetScreen from '../screens/main/TimeSheetScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
 import ApplyLeaveScreen from '../screens/main/ApplyLeaveScreen';
+import ShiftTrackerScreen from '../screens/main/ShiftTrackerScreen';
 import { MAIN_ROUTES } from './routes';
 
 const Stack = createNativeStackNavigator();
@@ -79,6 +80,11 @@ const MainStackNavigator = () => {
           name={MAIN_ROUTES.APPLY_LEAVE}
           component={ApplyLeaveScreen}
           listeners={focusListener(MAIN_ROUTES.APPLY_LEAVE, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.SHIFT_TRACKER}
+          component={ShiftTrackerScreen}
+          listeners={focusListener(MAIN_ROUTES.SHIFT_TRACKER, setActiveRoute)}
         />
       </Stack.Navigator>
       <CustomDrawer />
