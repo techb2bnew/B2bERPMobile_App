@@ -696,7 +696,11 @@ const DashboardScreen = () => {
 
                     return (
                       <View key={session.id} style={styles.shiftWidgetRow}>
-                        <UserAvatar name={session.employee_name} size={wp(10.5)} />
+                        <UserAvatar
+                          name={session.employee_name}
+                          userId={session.employee_id}
+                          size={wp(10.5)}
+                        />
 
                         <View style={styles.employeeMeta}>
                           <Text style={styles.employeeName} numberOfLines={1}>

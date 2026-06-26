@@ -231,6 +231,71 @@ const formatSelectedDateDisplay = (date) => {
   });
 };
 
+const getMockTasksForDate = (date) => {
+  const dateKey = getLocalDateKey(date);
+  const todayKey = getLocalDateKey(new Date());
+
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = getLocalDateKey(yesterday);
+
+  if (dateKey === todayKey) {
+    return {
+      'emp-1': [
+        { id: 'mt-1', title: 'Design premium task details tab', project_name: 'ERP Mobile App', status: 'in-progress', todoSecs: 0, progressSecs: 8100, testingSecs: 0, doneSecs: 0, totalSecs: 8100 },
+        { id: 'mt-2', title: 'Setup database triggers for status log', project_name: 'B2B Core Web', status: 'to-do', todoSecs: 10800, progressSecs: 0, testingSecs: 0, doneSecs: 0, totalSecs: 10800 },
+      ],
+      'emp-2': [
+        { id: 'mt-3', title: 'QA testing of clock session mappings', project_name: 'QA Dashboard', status: 'in-progress', todoSecs: 0, progressSecs: 11400, testingSecs: 0, doneSecs: 0, totalSecs: 11400 },
+      ],
+      'emp-3': [
+        { id: 'mt-4', title: 'Fix Login Issue', project_name: 'JOP Electric', status: 'in-progress', todoSecs: 0, progressSecs: 12000, testingSecs: 0, doneSecs: 0, totalSecs: 12000 },
+      ],
+      'emp-6': [
+        { id: 'mt-5', title: 'new UI Modifications in home page as per figma', project_name: 'RPR Logistics', status: 'in-progress', todoSecs: 0, progressSecs: 1440, testingSecs: 0, doneSecs: 0, totalSecs: 1440 },
+        { id: 'mt-6', title: 'truck dispatch USA pages and UI changes in home page', project_name: 'B2B Campus', status: 'ready-for-testing', todoSecs: 0, progressSecs: 11580, testingSecs: 1440, doneSecs: 0, totalSecs: 13020 },
+      ],
+      'emp-7': [
+        { id: 'mt-7', title: 'Test the B2B campus site', project_name: 'B2B Campus', status: 'to-do', todoSecs: 21240, progressSecs: 10620, testingSecs: 0, doneSecs: 0, totalSecs: 31860 },
+      ]
+    };
+  } else if (dateKey === yesterdayKey) {
+    return {
+      'emp-1': [
+        { id: 'mt-y1', title: 'Setup database triggers for status log', project_name: 'B2B Core Web', status: 'done', todoSecs: 3600, progressSecs: 14400, testingSecs: 0, doneSecs: 10800, totalSecs: 28800 },
+        { id: 'mt-y2', title: 'Fix Android navbar alignment issues', project_name: 'ERP Mobile App', status: 'done', todoSecs: 1800, progressSecs: 7200, testingSecs: 0, doneSecs: 0, totalSecs: 9000 },
+      ],
+      'emp-2': [
+        { id: 'mt-y3', title: 'Draft weekly hours aggregate report', project_name: 'HR Analytics', status: 'done', todoSecs: 7200, progressSecs: 18000, testingSecs: 0, doneSecs: 3600, totalSecs: 28800 },
+      ],
+      'emp-3': [
+        { id: 'mt-y4', title: 'set time tracker', project_name: 'Base2Brand Website', status: 'done', todoSecs: 7200, progressSecs: 21600, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+      ],
+      'emp-6': [
+        { id: 'mt-y5', title: 'Create new truck dispatch USA pages and UI changes in home page', project_name: 'B2B Campus', status: 'done', todoSecs: 0, progressSecs: 16440, testingSecs: 12360, doneSecs: 0, totalSecs: 28800 },
+      ],
+      'emp-7': [
+        { id: 'mt-y6', title: 'Test the B2B campus site', project_name: 'B2B Campus', status: 'done', todoSecs: 0, progressSecs: 28800, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+      ]
+    };
+  } else {
+    return {
+      'emp-1': [
+        { id: 'mt-o1', title: 'Code Review & Refactoring', project_name: 'ERP Mobile App', status: 'done', todoSecs: 3600, progressSecs: 25200, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+      ],
+      'emp-2': [
+        { id: 'mt-o2', title: 'Database Optimization', project_name: 'B2B Core Web', status: 'done', todoSecs: 3600, progressSecs: 25200, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+      ],
+      'emp-3': [
+        { id: 'mt-o3', title: 'API Integration testing', project_name: 'JOP Electric', status: 'done', todoSecs: 3600, progressSecs: 25200, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+      ],
+      'emp-6': [
+        { id: 'mt-o4', title: 'Initial structure setup', project_name: 'RPR Logistics', status: 'done', todoSecs: 0, progressSecs: 28800, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+      ]
+    };
+  }
+};
+
 const ShiftTrackerScreen = () => {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -245,6 +310,17 @@ const ShiftTrackerScreen = () => {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [employees, setEmployees] = useState([]);
+  const [tick, setTick] = useState(0);
+  const [expandedSessionId, setExpandedSessionId] = useState(null);
+  const [rawTasks, setRawTasks] = useState([]);
+  const [rawHistory, setRawHistory] = useState([]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTick(t => t + 1);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const selectedEmployeeName = useMemo(() => {
     if (!selectedEmployeeId) return '';
@@ -266,7 +342,8 @@ const ShiftTrackerScreen = () => {
     const endOfDay = new Date(selectedDate);
     endOfDay.setHours(23, 59, 59, 999);
     return endOfDay.getTime();
-  }, [selectedDate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate, tick]);
 
   const activeSession = useMemo(() => {
     return sessions.find(s => s.id === selectedSessionId) || null;
@@ -361,6 +438,12 @@ const ShiftTrackerScreen = () => {
       arrivalStatus,
     };
   }, [activeSession]);
+
+  const modalActiveTask = useMemo(() => {
+    if (!activeSession) return null;
+    const tasks = allTasksByEmployee[activeSession.employee_id] || [];
+    return tasks.find(t => t.status === 'in-progress' || t.status === 'doing') || null;
+  }, [activeSession, allTasksByEmployee]);
 
   const logItems = useMemo(() => {
     if (!activeSession) return [];
@@ -516,8 +599,12 @@ const ShiftTrackerScreen = () => {
           });
 
           setEmployeeTasks(tasksWithTime);
+          setRawTasks(tasks);
+          setRawHistory(history || []);
         } else {
           setEmployeeTasks([]);
+          setRawTasks([]);
+          setRawHistory([]);
         }
       } else {
         // Offline / Mock Data for employees
@@ -537,10 +624,14 @@ const ShiftTrackerScreen = () => {
           { id: 't-mock-2', title: 'Refactor state selectors in store', project: 'B2B Core Web', status: 'done', priority: 'medium', timeSpentStr: '2h 30m', estimatedHours: '3' }
         ];
         setEmployeeTasks(userMockTasks);
+        setRawTasks([]);
+        setRawHistory([]);
       }
     } catch (err) {
       console.error('Error loading employee tasks:', err);
       setEmployeeTasks([]);
+      setRawTasks([]);
+      setRawHistory([]);
     } finally {
       setTasksLoading(false);
     }
@@ -559,6 +650,84 @@ const ShiftTrackerScreen = () => {
   const pastSessionsOnly = useMemo(() => {
     return historySessions.filter(s => s.id !== selectedSessionId);
   }, [historySessions, selectedSessionId]);
+
+  const getHistoricalTasksForDate = useCallback((date) => {
+    if (!rawTasks || rawTasks.length === 0) return [];
+
+    const dateKey = getLocalDateKey(date);
+    const startOfDayMs = new Date(`${dateKey}T00:00:00`).getTime();
+    const endOfDayMs = new Date(`${dateKey}T23:59:59.999`).getTime();
+
+    // Group history by task_id
+    const historyByTaskId = {};
+    rawHistory.forEach(h => {
+      if (!historyByTaskId[h.task_id]) {
+        historyByTaskId[h.task_id] = [];
+      }
+      historyByTaskId[h.task_id].push(h);
+    });
+
+    return rawTasks.map(task => {
+      const hist = historyByTaskId[task.id] || [];
+      let todoSecs = 0;
+      let progressSecs = 0;
+      let testingSecs = 0;
+      let doneSecs = 0;
+
+      hist.forEach(h => {
+        const enteredTime = new Date(h.entered_at).getTime();
+        const exitedTime = h.exited_at ? new Date(h.exited_at).getTime() : Date.now();
+
+        const overlapStart = Math.max(enteredTime, startOfDayMs);
+        const overlapEnd = Math.min(exitedTime, endOfDayMs);
+        const secs = overlapStart < overlapEnd ? Math.max(0, Math.floor((overlapEnd - overlapStart) / 1000)) : 0;
+
+        const status = (h.to_status || '').toLowerCase();
+        if (status === 'to-do' || status === 'todo') {
+          todoSecs += secs;
+        } else if (status === 'in-progress' || status === 'doing') {
+          progressSecs += secs;
+        } else if (status === 'ready-for-testing' || status === 'testing' || status === 'qa') {
+          testingSecs += secs;
+        } else if (status === 'done') {
+          doneSecs += secs;
+        }
+      });
+
+      // Map current state duration as well if not logged in history
+      const currentStatus = (task.status || '').toLowerCase();
+      const hasActiveHistory = hist.some(h => !h.exited_at);
+      if (!hasActiveHistory && currentStatus) {
+        const enteredTime = new Date(task.updated_at || task.created_at).getTime();
+
+        const overlapStart = Math.max(enteredTime, startOfDayMs);
+        const overlapEnd = Math.min(Date.now(), endOfDayMs);
+        const elapsed = overlapStart < overlapEnd ? Math.max(0, Math.floor((overlapEnd - overlapStart) / 1000)) : 0;
+
+        if (currentStatus === 'to-do' || currentStatus === 'todo') {
+          todoSecs += elapsed;
+        } else if (currentStatus === 'in-progress' || currentStatus === 'doing') {
+          progressSecs += elapsed;
+        } else if (currentStatus === 'ready-for-testing' || currentStatus === 'testing' || currentStatus === 'qa') {
+          testingSecs += elapsed;
+        } else if (currentStatus === 'done') {
+          doneSecs += elapsed;
+        }
+      }
+
+      const totalSecs = todoSecs + progressSecs + testingSecs + doneSecs;
+
+      return {
+        ...task,
+        todoSecs,
+        progressSecs,
+        testingSecs,
+        doneSecs,
+        totalSecs,
+        timeSpentStr: totalSecs > 0 ? formatSecsToMinHr(totalSecs) : '0m',
+      };
+    }).filter(t => t.totalSecs > 0);
+  }, [rawTasks, rawHistory]);
 
   const visualHistoryStats = useMemo(() => {
     if (!sessionStats) return null;
@@ -741,6 +910,11 @@ const ShiftTrackerScreen = () => {
               historyByTaskId[h.task_id].push(h);
             });
 
+            const dateKey = getLocalDateKey(selectedDate);
+            const startOfDayMs = new Date(`${dateKey}T00:00:00`).getTime();
+            const endOfDayMs = new Date(`${dateKey}T23:59:59.999`).getTime();
+            const isTodaySelectedVal = dateKey === getLocalDateKey(new Date());
+
             // Map time spent in each state for each task
             const tasksWithTime = rawTasks.map(task => {
               const hist = historyByTaskId[task.id] || [];
@@ -750,10 +924,12 @@ const ShiftTrackerScreen = () => {
               let doneSecs = 0;
 
               hist.forEach(h => {
-                let secs = h.duration_seconds || 0;
-                if (!h.exited_at && h.entered_at) {
-                  secs += Math.max(0, Math.floor((referenceTime - new Date(h.entered_at).getTime()) / 1000));
-                }
+                const enteredTime = new Date(h.entered_at).getTime();
+                const exitedTime = h.exited_at ? new Date(h.exited_at).getTime() : referenceTime;
+
+                const overlapStart = Math.max(enteredTime, startOfDayMs);
+                const overlapEnd = Math.min(exitedTime, referenceTime);
+                const secs = overlapStart < overlapEnd ? Math.max(0, Math.floor((overlapEnd - overlapStart) / 1000)) : 0;
 
                 const status = (h.to_status || '').toLowerCase();
                 if (status === 'to-do' || status === 'todo') {
@@ -771,7 +947,12 @@ const ShiftTrackerScreen = () => {
               const currentStatus = (task.status || '').toLowerCase();
               const hasActiveHistory = hist.some(h => !h.exited_at);
               if (!hasActiveHistory && currentStatus) {
-                const elapsed = Math.max(0, Math.floor((referenceTime - new Date(task.updated_at || task.created_at).getTime()) / 1000));
+                const enteredTime = new Date(task.updated_at || task.created_at).getTime();
+
+                const overlapStart = Math.max(enteredTime, startOfDayMs);
+                const overlapEnd = Math.min(referenceTime, endOfDayMs);
+                const elapsed = overlapStart < overlapEnd ? Math.max(0, Math.floor((overlapEnd - overlapStart) / 1000)) : 0;
+
                 if (currentStatus === 'to-do' || currentStatus === 'todo') {
                   todoSecs += elapsed;
                 } else if (currentStatus === 'in-progress' || currentStatus === 'doing') {
@@ -797,7 +978,7 @@ const ShiftTrackerScreen = () => {
             // Group tasks by employee_id
             const tasksByEmp = {};
             empIds.forEach(empId => {
-              tasksByEmp[empId] = tasksWithTime.filter(task => {
+              const empTasks = tasksWithTime.filter(task => {
                 const assigneeIds = [];
                 if (task.assignee_ids) {
                   if (Array.isArray(task.assignee_ids)) {
@@ -818,6 +999,12 @@ const ShiftTrackerScreen = () => {
                 }
                 return assigneeIds.includes(empId);
               });
+
+              if (isTodaySelectedVal) {
+                tasksByEmp[empId] = empTasks;
+              } else {
+                tasksByEmp[empId] = empTasks.filter(t => (t.totalSecs || 0) > 0);
+              }
             });
 
             setAllTasksByEmployee(tasksByEmp);
@@ -846,21 +1033,70 @@ const ShiftTrackerScreen = () => {
         });
         setSessions(adjustedSessions);
         setEmployees(MOCK_EMPLOYEES);
-        // Map mock tasks for offline/mock mode matching the screenshot
-        const mockTasksByEmp = {
-          'emp-6': [
-            { id: 'mt-1', title: 'new UI Modifications in home page as per figma', project_name: 'RPR Logistics', status: 'in-progress', todoSecs: 0, progressSecs: 1440, testingSecs: 0, doneSecs: 0, totalSecs: 1440 },
-            { id: 'mt-2', title: 'truck dispatch USA pages and UI changes in home page', project_name: 'B2B Campus', status: 'ready-for-testing', todoSecs: 0, progressSecs: 11580, testingSecs: 1440, doneSecs: 0, totalSecs: 13020 },
-            { id: 'mt-3', title: 'Create new truck dispatch USA pages and UI changes in home page', project_name: 'B2B Campus', status: 'ready-for-testing', todoSecs: 0, progressSecs: 16440, testingSecs: 13500, doneSecs: 0, totalSecs: 29940 },
-          ],
-          'emp-7': [
-            { id: 'mt-4', title: 'Test the B2B campus site', project_name: 'B2B Campus', status: 'to-do', todoSecs: 21240, progressSecs: 10620, testingSecs: 0, doneSecs: 0, totalSecs: 31860 },
-          ],
-          'emp-3': [
-            { id: 'mt-5', title: 'Fix Login Issue', project_name: 'JOP Electric', status: 'ready-for-testing', todoSecs: 0, progressSecs: 21600, testingSecs: 18720, doneSecs: 0, totalSecs: 40320 },
-            { id: 'mt-6', title: 'set time tracker', project_name: 'Base2Brand Website', status: 'to-do', todoSecs: 90000, progressSecs: 0, testingSecs: 0, doneSecs: 0, totalSecs: 90000 },
-          ]
-        };
+        const dateKey = getLocalDateKey(selectedDate);
+        const todayKey = getLocalDateKey(new Date());
+
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayKey = getLocalDateKey(yesterday);
+
+        let mockTasksByEmp = {};
+
+        if (dateKey === todayKey) {
+          mockTasksByEmp = {
+            'emp-1': [
+              { id: 'mt-1', title: 'Design premium task details tab', project_name: 'ERP Mobile App', status: 'in-progress', todoSecs: 0, progressSecs: 8100, testingSecs: 0, doneSecs: 0, totalSecs: 8100 },
+              { id: 'mt-2', title: 'Setup database triggers for status log', project_name: 'B2B Core Web', status: 'to-do', todoSecs: 10800, progressSecs: 0, testingSecs: 0, doneSecs: 0, totalSecs: 10800 },
+            ],
+            'emp-2': [
+              { id: 'mt-3', title: 'QA testing of clock session mappings', project_name: 'QA Dashboard', status: 'in-progress', todoSecs: 0, progressSecs: 11400, testingSecs: 0, doneSecs: 0, totalSecs: 11400 },
+            ],
+            'emp-3': [
+              { id: 'mt-4', title: 'Fix Login Issue', project_name: 'JOP Electric', status: 'in-progress', todoSecs: 0, progressSecs: 12000, testingSecs: 0, doneSecs: 0, totalSecs: 12000 },
+            ],
+            'emp-6': [
+              { id: 'mt-5', title: 'new UI Modifications in home page as per figma', project_name: 'RPR Logistics', status: 'in-progress', todoSecs: 0, progressSecs: 1440, testingSecs: 0, doneSecs: 0, totalSecs: 1440 },
+              { id: 'mt-6', title: 'truck dispatch USA pages and UI changes in home page', project_name: 'B2B Campus', status: 'ready-for-testing', todoSecs: 0, progressSecs: 11580, testingSecs: 1440, doneSecs: 0, totalSecs: 13020 },
+            ],
+            'emp-7': [
+              { id: 'mt-7', title: 'Test the B2B campus site', project_name: 'B2B Campus', status: 'to-do', todoSecs: 21240, progressSecs: 10620, testingSecs: 0, doneSecs: 0, totalSecs: 31860 },
+            ]
+          };
+        } else if (dateKey === yesterdayKey) {
+          mockTasksByEmp = {
+            'emp-1': [
+              { id: 'mt-y1', title: 'Setup database triggers for status log', project_name: 'B2B Core Web', status: 'done', todoSecs: 3600, progressSecs: 14400, testingSecs: 0, doneSecs: 10800, totalSecs: 28800 },
+              { id: 'mt-y2', title: 'Fix Android navbar alignment issues', project_name: 'ERP Mobile App', status: 'done', todoSecs: 1800, progressSecs: 7200, testingSecs: 0, doneSecs: 0, totalSecs: 9000 },
+            ],
+            'emp-2': [
+              { id: 'mt-y3', title: 'Draft weekly hours aggregate report', project_name: 'HR Analytics', status: 'done', todoSecs: 7200, progressSecs: 18000, testingSecs: 0, doneSecs: 3600, totalSecs: 28800 },
+            ],
+            'emp-3': [
+              { id: 'mt-y4', title: 'set time tracker', project_name: 'Base2Brand Website', status: 'done', todoSecs: 7200, progressSecs: 21600, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+            ],
+            'emp-6': [
+              { id: 'mt-y5', title: 'Create new truck dispatch USA pages and UI changes in home page', project_name: 'B2B Campus', status: 'done', todoSecs: 0, progressSecs: 16440, testingSecs: 12360, doneSecs: 0, totalSecs: 28800 },
+            ],
+            'emp-7': [
+              { id: 'mt-y6', title: 'Test the B2B campus site', project_name: 'B2B Campus', status: 'done', todoSecs: 0, progressSecs: 28800, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+            ]
+          };
+        } else {
+          mockTasksByEmp = {
+            'emp-1': [
+              { id: 'mt-o1', title: 'Code Review & Refactoring', project_name: 'ERP Mobile App', status: 'done', todoSecs: 3600, progressSecs: 25200, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+            ],
+            'emp-2': [
+              { id: 'mt-o2', title: 'Database Optimization', project_name: 'B2B Core Web', status: 'done', todoSecs: 3600, progressSecs: 25200, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+            ],
+            'emp-3': [
+              { id: 'mt-o3', title: 'API Integration testing', project_name: 'JOP Electric', status: 'done', todoSecs: 3600, progressSecs: 25200, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+            ],
+            'emp-6': [
+              { id: 'mt-o4', title: 'Initial structure setup', project_name: 'RPR Logistics', status: 'done', todoSecs: 0, progressSecs: 28800, testingSecs: 0, doneSecs: 0, totalSecs: 28800 },
+            ]
+          };
+        }
         setAllTasksByEmployee(mockTasksByEmp);
       }
     } catch (e) {
@@ -989,6 +1225,9 @@ const ShiftTrackerScreen = () => {
   };
 
   const renderEmployeeRow = ({ item: session }) => {
+    const tasks = allTasksByEmployee[session.employee_id] || [];
+    const activeTask = tasks.find(t => t.status === 'in-progress' || t.status === 'doing');
+
     // Calculate current activity text and colors matching web view
     let statusDotColor = '#8B949E'; // Gray (Offline)
     let statusText = 'Offline';
@@ -1036,8 +1275,6 @@ const ShiftTrackerScreen = () => {
     });
 
     if (trackingMode === 'TASK') {
-      const tasks = allTasksByEmployee[session.employee_id] || [];
-
       return (
         <View style={styles.employeeCard}>
           <TouchableOpacity
@@ -1046,7 +1283,11 @@ const ShiftTrackerScreen = () => {
             activeOpacity={0.85}>
             {/* Left Column: Employee details */}
             <View style={styles.taskModeEmpCol}>
-              <UserAvatar name={session.employee_name} size={wp(10.5)} />
+              <UserAvatar
+                name={session.employee_name}
+                userId={session.employee_id}
+                size={wp(10.5)}
+              />
               <View style={styles.taskModeEmpMeta}>
                 <Text style={styles.employeeName} numberOfLines={1}>{session.employee_name}</Text>
                 <View style={styles.statusRow}>
@@ -1072,13 +1313,14 @@ const ShiftTrackerScreen = () => {
                 <View style={styles.taskModeTasksList}>
                   {tasks.map(task => {
                     const totalSecs = task.totalSecs || 0;
+                    const isActiveTask = task.status === 'in-progress' || task.status === 'doing';
 
                     // Task status label and colors
                     let statusLabel = task.status || 'To Do';
                     let statusColor = '#8B949E';
                     let statusBg = 'rgba(255, 255, 255, 0.05)';
 
-                    if (task.status === 'in-progress' || task.status === 'doing') {
+                    if (isActiveTask) {
                       statusLabel = 'In Progress';
                       statusColor = '#3498DB';
                       statusBg = 'rgba(52, 152, 219, 0.15)';
@@ -1116,17 +1358,25 @@ const ShiftTrackerScreen = () => {
                     return (
                       <TouchableOpacity
                         key={task.id}
-                        style={styles.taskModeItemRow}
+                        style={[
+                          styles.taskModeItemRow,
+                          isActiveTask && styles.activeTaskModeItemRow
+                        ]}
                         onPress={() => setSelectedTaskDetail(task)}
                         activeOpacity={0.85}>
                         <View style={styles.taskModeItemContent}>
                           {/* Task Title & Project */}
                           <View style={styles.taskModeItemTitleRow}>
-                            <Text style={styles.taskModeItemTitle} numberOfLines={1}>
-                              {task.title}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: wp(1.2) }}>
+                              {isActiveTask && (
+                                <Icon name="play" size={wp(3)} color="#3498DB" />
+                              )}
+                              <Text style={styles.taskModeItemTitle} numberOfLines={1}>
+                                {task.title}
+                              </Text>
+                            </View>
                             <Text style={styles.taskModeItemProject} numberOfLines={1}>
-                              {task.project_name}
+                              {task.project_name || task.project}
                             </Text>
                           </View>
 
@@ -1186,44 +1436,76 @@ const ShiftTrackerScreen = () => {
     return (
       <View style={styles.employeeCard}>
         <TouchableOpacity
-          style={styles.cardHeader}
           onPress={() => handleOpenDetail(session.id)}
           activeOpacity={0.85}>
+          <View style={styles.cardHeader}>
+            <UserAvatar
+              name={session.employee_name}
+              userId={session.employee_id}
+              size={wp(10.5)}
+            />
 
-          <UserAvatar name={session.employee_name} size={wp(10.5)} />
+            <View style={styles.employeeMeta}>
+              <Text style={styles.employeeName}>{session.employee_name}</Text>
+              <Text style={styles.employeeDept} numberOfLines={1}>
+                {session.employee_dept || 'Digital Marketing'}
+              </Text>
+              <View style={styles.statusRow}>
+                <View style={[styles.statusDot, { backgroundColor: statusDotColor }]} />
+                <Text style={styles.statusLabel} numberOfLines={1}>{statusText}</Text>
+              </View>
+            </View>
 
-          <View style={styles.employeeMeta}>
-            <Text style={styles.employeeName}>{session.employee_name}</Text>
-            <Text style={styles.employeeDept} numberOfLines={1}>
-              {session.employee_dept || 'Digital Marketing'}
-            </Text>
-            <View style={styles.statusRow}>
-              <View style={[styles.statusDot, { backgroundColor: statusDotColor }]} />
-              <Text style={styles.statusLabel} numberOfLines={1}>{statusText}</Text>
+            {/* Timeline center */}
+            <View style={styles.barWrapper}>
+              {renderTimelineBar(session.segments)}
+              <View style={styles.rowTimeLabels}>
+                <Text style={styles.rowTimeText}>
+                  In: {formatTimeOfDay(session.clock_in)}
+                </Text>
+                <Text style={styles.rowTimeText}>
+                  Out: {session.clock_out ? formatTimeOfDay(session.clock_out) : 'Active'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Total Working Hours */}
+            <View style={styles.productivityWrapper}>
+              <Text style={styles.workingHoursValue}>
+                {session.status === 'offline' || workingMs === 0 ? '-' : formatDuration(workingMs)}
+              </Text>
+              <Text style={styles.prodLabel}>Work Time</Text>
             </View>
           </View>
 
-          {/* Timeline center */}
-          <View style={styles.barWrapper}>
-            {renderTimelineBar(session.segments)}
-            <View style={styles.rowTimeLabels}>
-              <Text style={styles.rowTimeText}>
-                In: {formatTimeOfDay(session.clock_in)}
-              </Text>
-              <Text style={styles.rowTimeText}>
-                Out: {session.clock_out ? formatTimeOfDay(session.clock_out) : 'Active'}
-              </Text>
-            </View>
-          </View>
-
-          {/* Total Working Hours */}
-          <View style={styles.productivityWrapper}>
-            <Text style={styles.workingHoursValue}>
-              {session.status === 'offline' || workingMs === 0 ? '-' : formatDuration(workingMs)}
-            </Text>
-            <Text style={styles.prodLabel}>Work Time</Text>
-          </View>
-
+          {/* Active Task Footer for Clocked In Employees */}
+          {isTodaySelected && (
+            <>
+              {activeTask ? (
+                <View style={styles.cardActiveTaskFooter}>
+                  <View style={styles.activeTaskIndicatorGroup}>
+                    <View style={styles.pulseDot} />
+                    <Text style={styles.activeTaskPrefix}>Active: </Text>
+                    <Text style={styles.activeTaskTitle} numberOfLines={1}>
+                      {activeTask.title}
+                    </Text>
+                  </View>
+                  <Text style={styles.activeTaskTime}>
+                    {formatSecsToMinHr(activeTask.progressSecs)}
+                  </Text>
+                </View>
+              ) : session.status === 'active' ? (
+                <View style={[styles.cardActiveTaskFooter, styles.idleFooter]}>
+                  <View style={styles.activeTaskIndicatorGroup}>
+                    <Icon name="alert-circle" size={wp(3.5)} color="#F85149" />
+                    <Text style={[styles.activeTaskPrefix, { color: '#F85149', marginLeft: wp(1) }]}>
+                      No active task (Idle)
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+            </>
+          )}
         </TouchableOpacity>
       </View>
     );
@@ -1256,12 +1538,27 @@ const ShiftTrackerScreen = () => {
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <AppHeader title="Shift Tracker" />
 
-        {/* Combined Date and Employee Filters Bar */}
+        {/* Combined Filters Row with Fixed Date Chip */}
         <View style={styles.filtersContainer}>
-          {/* Employee Selector horizontal scroll (takes remaining width) */}
+          {/* Fixed Date Picker Chip */}
+          <TouchableOpacity
+            style={styles.scrollDateChip}
+            onPress={() => setShowDatePicker(true)}
+            activeOpacity={0.85}>
+            <Icon name="calendar" size={wp(3.5)} color="#ffffff" />
+            <Text style={styles.scrollDateChipText}>
+              {formatSelectedDateDisplay(selectedDate)}
+            </Text>
+            <Icon name="chevron-down" size={wp(3)} color="rgba(255,255,255,0.7)" />
+          </TouchableOpacity>
 
+          {/* Fixed Vertical Divider */}
+          <View style={styles.scrollChipDivider} />
+
+          {/* Scrollable Employee Selector Chips */}
           <ScrollView
             horizontal
+            style={{ flex: 1 }}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.employeeSelectorScroll}>
 
@@ -1300,7 +1597,11 @@ const ShiftTrackerScreen = () => {
                   ]}
                   onPress={() => setSelectedEmployeeId(emp.id)}
                   activeOpacity={0.85}>
-                  <UserAvatar name={emp.name} size={wp(6)} />
+                  <UserAvatar
+                    name={emp.name}
+                    userId={emp.id}
+                    size={wp(6)}
+                  />
                   <Text style={[
                     styles.employeeChipText,
                     isActive && styles.activeEmployeeChipText
@@ -1311,40 +1612,6 @@ const ShiftTrackerScreen = () => {
               );
             })}
           </ScrollView>
-
-          {/* Vertical Divider */}
-          <View style={styles.verticalFilterDivider} />
-
-          {/* Date Picker & Navigators */}
-          <View style={styles.dateNavGroup}>
-            <TouchableOpacity
-              style={styles.miniChevronButton}
-              onPress={handlePrevDay}
-              activeOpacity={0.7}>
-              <Icon name="chevron-left" size={wp(3.8)} color={darkTextPrimaryColor} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.compactDateButton}
-              onPress={() => setShowDatePicker(true)}
-              activeOpacity={0.7}>
-              <Text style={styles.compactDateText} numberOfLines={1}>
-                {formatSelectedDateDisplay(selectedDate)}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.miniChevronButton, isTodaySelected && styles.disabledMiniChevronButton]}
-              onPress={handleNextDay}
-              disabled={isTodaySelected}
-              activeOpacity={0.7}>
-              <Icon
-                name="chevron-right"
-                size={wp(3.8)}
-                color={isTodaySelected ? 'rgba(255, 255, 255, 0.15)' : darkTextPrimaryColor}
-              />
-            </TouchableOpacity>
-          </View>
         </View>
 
         {loading ? (
@@ -1451,7 +1718,11 @@ const ShiftTrackerScreen = () => {
           onRequestClose={() => setSelectedSessionId(null)}>
           <SafeAreaView style={styles.modalSafeArea} edges={['top', 'left', 'right', 'bottom']}>
             <View style={styles.modalHeaderRow}>
-              <UserAvatar name={activeSession.employee_name} size={wp(13)} />
+              <UserAvatar
+                name={activeSession.employee_name}
+                userId={activeSession.employee_id}
+                size={wp(13)}
+              />
               <View style={styles.modalHeaderMeta}>
                 <Text style={styles.modalEmployeeName}>{activeSession.employee_name}</Text>
                 <Text style={styles.modalEmployeeSubtitle}>
@@ -1523,7 +1794,7 @@ const ShiftTrackerScreen = () => {
                           <View style={styles.liveItemTexts}>
                             <Text style={styles.liveItemLabel}>Current task</Text>
                             <Text style={styles.liveItemValue} numberOfLines={1}>
-                              Not started (move to In Progress)
+                              {modalActiveTask ? modalActiveTask.title : 'No task in progress'}
                             </Text>
                           </View>
                         </View>
@@ -1532,7 +1803,9 @@ const ShiftTrackerScreen = () => {
                           <Icon name="monitor" size={wp(3.8)} color={darkTextSecondaryColor} />
                           <View style={styles.liveItemTexts}>
                             <Text style={styles.liveItemLabel}>App</Text>
-                            <Text style={styles.liveItemValue} numberOfLines={1}>—</Text>
+                            <Text style={styles.liveItemValue} numberOfLines={1}>
+                              {modalActiveTask ? (activeSession.employee_dept === 'Development' ? 'VS Code' : 'Browser / Figma') : '—'}
+                            </Text>
                           </View>
                         </View>
 
@@ -1541,7 +1814,7 @@ const ShiftTrackerScreen = () => {
                           <View style={styles.liveItemTexts}>
                             <Text style={styles.liveItemLabel}>Screen</Text>
                             <Text style={styles.liveItemValue} numberOfLines={1}>
-                              No task in progress
+                              {modalActiveTask ? `Working on ${modalActiveTask.project_name || modalActiveTask.project}` : 'No active screen'}
                             </Text>
                           </View>
                         </View>
@@ -1897,35 +2170,108 @@ const ShiftTrackerScreen = () => {
                           const dateObj = new Date(session.clock_in);
                           const dayText = dateObj.toLocaleDateString([], { weekday: 'short' });
                           const dateText = dateObj.toLocaleDateString([], { day: '2-digit', month: 'short' });
+                          const isExpanded = expandedSessionId === session.id;
+                          const sessionTasks = isSupabaseConfigured
+                            ? getHistoricalTasksForDate(new Date(session.clock_in))
+                            : (getMockTasksForDate(new Date(session.clock_in))[session.employee_id] || []);
 
                           return (
-                            <View key={session.id || index} style={styles.historyItem}>
-                              <View style={styles.historyDateCol}>
-                                <Text style={styles.historyDay}>{dayText}</Text>
-                                <Text style={styles.historyDate}>{dateText}</Text>
-                              </View>
-                              <View style={styles.historyStatsCol}>
-                                <View style={styles.historyMiniProgress}>
-                                  {stats.workPct > 0 && (
-                                    <View style={[styles.miniProgressSegment, { backgroundColor: '#3498DB', flex: stats.workPct }]} />
-                                  )}
-                                  {stats.meetingPct > 0 && (
-                                    <View style={[styles.miniProgressSegment, { backgroundColor: '#9B59B6', flex: stats.meetingPct }]} />
-                                  )}
-                                  {stats.breakPct > 0 && (
-                                    <View style={[styles.miniProgressSegment, { backgroundColor: '#F5C542', flex: stats.breakPct }]} />
-                                  )}
-                                  {stats.idlePct > 0 && (
-                                    <View style={[styles.miniProgressSegment, { backgroundColor: '#F85149', flex: stats.idlePct }]} />
+                            <View key={session.id || index} style={[styles.historyItemContainer, isExpanded && styles.activeHistoryItemContainer]}>
+                              <TouchableOpacity
+                                style={styles.historyItemHeader}
+                                onPress={() => setExpandedSessionId(isExpanded ? null : session.id)}
+                                activeOpacity={0.85}>
+                                <View style={styles.historyDateCol}>
+                                  <Text style={styles.historyDay}>{dayText}</Text>
+                                  <Text style={styles.historyDate}>{dateText}</Text>
+                                </View>
+                                <View style={styles.historyStatsCol}>
+                                  <View style={styles.historyMiniProgress}>
+                                    {stats.workPct > 0 && (
+                                      <View style={[styles.miniProgressSegment, { backgroundColor: '#3498DB', flex: stats.workPct }]} />
+                                    )}
+                                    {stats.meetingPct > 0 && (
+                                      <View style={[styles.miniProgressSegment, { backgroundColor: '#9B59B6', flex: stats.meetingPct }]} />
+                                    )}
+                                    {stats.breakPct > 0 && (
+                                      <View style={[styles.miniProgressSegment, { backgroundColor: '#F5C542', flex: stats.breakPct }]} />
+                                    )}
+                                    {stats.idlePct > 0 && (
+                                      <View style={[styles.miniProgressSegment, { backgroundColor: '#F85149', flex: stats.idlePct }]} />
+                                    )}
+                                  </View>
+                                  <View style={styles.historySummaryRow}>
+                                    <Text style={styles.historySummaryText} numberOfLines={1}>
+                                      Work: {stats.workStr}
+                                      {stats.meetingMs > 0 ? ` • Meet: ${stats.meetingStr}` : ''}
+                                      {stats.breakMs > 0 ? ` • Break: ${stats.breakStr}` : ''}
+                                      {stats.idleMs > 0 ? ` • Idle: ${stats.idleStr}` : ''}
+                                    </Text>
+                                    <Icon
+                                      name={isExpanded ? "chevron-up" : "chevron-down"}
+                                      size={wp(3.8)}
+                                      color={darkTextSecondaryColor}
+                                      style={{ marginLeft: wp(1.5) }}
+                                    />
+                                  </View>
+                                </View>
+                              </TouchableOpacity>
+
+                              {isExpanded && (
+                                <View style={styles.historyTasksDropdown}>
+                                  <Text style={styles.dropdownTitle}>Daily Work Record</Text>
+                                  {sessionTasks.length === 0 ? (
+                                    <Text style={styles.dropdownEmptyText}>No tasks logged on this day.</Text>
+                                  ) : (
+                                    <View style={styles.dropdownTasksList}>
+                                      {sessionTasks.map(task => {
+                                        const taskTotalSecs = task.totalSecs || 0;
+                                        const taskTimeStr = taskTotalSecs > 0 ? formatSecsToMinHr(taskTotalSecs) : '0m';
+
+                                        // Status styling inside dropdown
+                                        let badgeColor = '#8B949E';
+                                        let badgeBg = 'rgba(255, 255, 255, 0.05)';
+                                        let label = task.status || 'To Do';
+
+                                        if (task.status === 'in-progress' || task.status === 'doing') {
+                                          badgeColor = '#3498DB';
+                                          badgeBg = 'rgba(52, 152, 219, 0.15)';
+                                          label = 'In Progress';
+                                        } else if (task.status === 'ready-for-testing' || task.status === 'testing' || task.status === 'qa') {
+                                          badgeColor = '#9B59B6';
+                                          badgeBg = 'rgba(155, 89, 182, 0.15)';
+                                          label = 'Testing';
+                                        } else if (task.status === 'done') {
+                                          badgeColor = '#3DDC84';
+                                          badgeBg = 'rgba(61, 220, 132, 0.15)';
+                                          label = 'Done';
+                                        }
+
+                                        return (
+                                          <View key={task.id} style={styles.dropdownTaskItem}>
+                                            <View style={styles.dropdownTaskMain}>
+                                              <Text style={styles.dropdownTaskTitle} numberOfLines={1}>
+                                                {task.title}
+                                              </Text>
+                                              <Text style={styles.dropdownTaskProject} numberOfLines={1}>
+                                                {task.project_name || task.project || 'General'}
+                                              </Text>
+                                            </View>
+                                            <View style={styles.dropdownTaskMeta}>
+                                              <View style={[styles.dropdownStatusBadge, { backgroundColor: badgeBg }]}>
+                                                <Text style={[styles.dropdownStatusText, { color: badgeColor }]}>
+                                                  {label}
+                                                </Text>
+                                              </View>
+                                              <Text style={styles.dropdownTaskTime}>{taskTimeStr}</Text>
+                                            </View>
+                                          </View>
+                                        );
+                                      })}
+                                    </View>
                                   )}
                                 </View>
-                                <Text style={styles.historySummaryText}>
-                                  Work: {stats.workStr}
-                                  {stats.meetingMs > 0 ? ` • Meet: ${stats.meetingStr}` : ''}
-                                  {stats.breakMs > 0 ? ` • Break: ${stats.breakStr}` : ''}
-                                  {stats.idleMs > 0 ? ` • Idle: ${stats.idleStr}` : ''}
-                                </Text>
-                              </View>
+                              )}
                             </View>
                           );
                         })}
@@ -3087,47 +3433,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: darkBorderColor,
     paddingHorizontal: wp(3),
-    paddingVertical: hp(0.8),
+    paddingVertical: hp(1.2),
   },
-  dateNavGroup: {
+  scrollDateChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: wp(1),
+    backgroundColor: PURPLE,
+    borderRadius: wp(4),
+    paddingHorizontal: wp(3),
+    paddingVertical: hp(1),
+    gap: wp(1.5),
   },
-  miniChevronButton: {
-    padding: wp(1.2),
-    borderRadius: wp(1.2),
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderWidth: 1,
-    borderColor: darkBorderColor,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  disabledMiniChevronButton: {
-    opacity: 0.4,
-    backgroundColor: 'transparent',
-  },
-  compactDateButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderWidth: 1,
-    borderColor: darkBorderColor,
-    borderRadius: wp(1.5),
-    paddingHorizontal: wp(2),
-    paddingVertical: hp(0.6),
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: wp(16),
-  },
-  compactDateText: {
+  scrollDateChipText: {
     fontSize: wp(2.5),
     fontWeight: '600',
-    color: darkTextPrimaryColor,
+    color: '#ffffff',
   },
-  verticalFilterDivider: {
+  scrollChipDivider: {
     width: 1,
     height: hp(2.5),
-    backgroundColor: darkBorderColor,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     marginHorizontal: wp(2),
+    alignSelf: 'center',
   },
   calendarOverlay: {
     flex: 1,
@@ -3199,5 +3526,153 @@ const styles = StyleSheet.create({
   },
   activeAllStaffIconBg: {
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  cardActiveTaskFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+    paddingVertical: hp(1.2),
+    paddingHorizontal: wp(3.5),
+  },
+  idleFooter: {
+    backgroundColor: 'rgba(248, 81, 73, 0.02)',
+  },
+  activeTaskIndicatorGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: wp(3),
+  },
+  pulseDot: {
+    width: wp(1.8),
+    height: wp(1.8),
+    borderRadius: wp(0.9),
+    backgroundColor: '#3498DB',
+    marginRight: wp(1.5),
+  },
+  activeTaskPrefix: {
+    fontSize: wp(2.6),
+    fontWeight: '600',
+    color: '#3498DB',
+  },
+  activeTaskTitle: {
+    fontSize: wp(2.6),
+    color: darkTextPrimaryColor,
+    flex: 1,
+  },
+  activeTaskTime: {
+    fontSize: wp(2.5),
+    fontWeight: '600',
+    color: '#3498DB',
+  },
+  activeTaskModeItemRow: {
+    backgroundColor: 'rgba(52, 152, 219, 0.05)',
+    borderColor: 'rgba(52, 152, 219, 0.25)',
+    borderWidth: 1,
+    borderRadius: wp(1.5),
+    paddingHorizontal: wp(2.5),
+    paddingVertical: hp(0.8),
+    marginBottom: hp(0.5),
+  },
+  // Expanded Accordion Styles
+  historyItemContainer: {
+    backgroundColor: '#161B22',
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: '#30363D',
+    overflow: 'hidden',
+  },
+  activeHistoryItemContainer: {
+    borderColor: 'rgba(52, 152, 219, 0.3)',
+  },
+  historyItemHeader: {
+    flexDirection: 'row',
+    paddingVertical: hp(1.4),
+    paddingHorizontal: wp(3.5),
+    alignItems: 'center',
+  },
+  historySummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    paddingRight: wp(2),
+  },
+  historyTasksDropdown: {
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderTopWidth: 1,
+    borderTopColor: '#30363D',
+    paddingHorizontal: wp(3.5),
+    paddingVertical: hp(1.5),
+  },
+  dropdownTitle: {
+    fontSize: wp(2.6),
+    fontWeight: '700',
+    color: '#8B949E',
+    letterSpacing: 0.5,
+    marginBottom: hp(1),
+    textTransform: 'uppercase',
+  },
+  dropdownEmptyText: {
+    fontSize: wp(2.6),
+    color: darkTextSecondaryColor,
+    fontStyle: 'italic',
+    paddingVertical: hp(0.5),
+  },
+  dropdownTasksList: {
+    gap: hp(1.2),
+  },
+  dropdownTaskItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.01)',
+    borderRadius: wp(1.5),
+    paddingVertical: hp(0.8),
+    paddingHorizontal: wp(2),
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  dropdownTaskMain: {
+    flex: 1,
+    paddingRight: wp(2),
+    gap: hp(0.2),
+  },
+  dropdownTaskTitle: {
+    fontSize: wp(2.8),
+    fontWeight: '600',
+    color: darkTextPrimaryColor,
+  },
+  dropdownTaskProject: {
+    fontSize: wp(2.4),
+    color: darkTextSecondaryColor,
+    opacity: 0.8,
+  },
+  dropdownTaskMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(2.5),
+  },
+  dropdownStatusBadge: {
+    paddingHorizontal: wp(1.8),
+    paddingVertical: hp(0.3),
+    borderRadius: wp(0.8),
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: wp(15),
+  },
+  dropdownStatusText: {
+    fontSize: wp(2.2),
+    fontWeight: '600',
+  },
+  dropdownTaskTime: {
+    fontSize: wp(2.6),
+    fontWeight: '600',
+    color: darkTextPrimaryColor,
+    minWidth: wp(10),
+    textAlign: 'right',
   },
 });
