@@ -28,6 +28,7 @@ import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../uti
 import { fetchTasksForAssignee } from '../../services/projectTasksService';
 import { Calendar } from 'react-native-calendars';
 import { getLocalDateKey } from '../../services/clockSessionsService';
+import { normalizeDepartmentName } from '../../services/hrmsService';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -365,6 +366,8 @@ const ShiftTrackerScreen = () => {
         workMs += duration;
       } else if (seg.kind === 'idle') {
         idleMs += duration;
+      } else if (seg.kind === 'meeting') {
+        meetingMs += duration;
       } else if (seg.kind === 'break') {
         const isMeeting = seg.label && seg.label.toLowerCase().includes('meeting');
         if (isMeeting) {
@@ -775,6 +778,8 @@ const ShiftTrackerScreen = () => {
         workMs += duration;
       } else if (seg.kind === 'idle') {
         idleMs += duration;
+      } else if (seg.kind === 'meeting') {
+        meetingMs += duration;
       } else if (seg.kind === 'break') {
         const isMeeting = seg.label && seg.label.toLowerCase().includes('meeting');
         if (isMeeting) {
@@ -870,7 +875,7 @@ const ShiftTrackerScreen = () => {
             return {
               ...session,
               employee_role: profile.role || 'Employee',
-              employee_dept: profile.dept || 'General',
+              employee_dept: normalizeDepartmentName(profile.dept),
               segments: (rawSegments || []).filter(seg => seg.session_id === session.id)
             };
           });

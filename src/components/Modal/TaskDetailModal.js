@@ -98,6 +98,10 @@ const TaskDetailModal = ({
   const [estimatedHours, setEstimatedHours] = useState('');
   const [saving, setSaving] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Auto-focus title ref
+  const titleInputRef = useRef(null);
   const scrollRef = useRef(null);
   const scrollOffsetRef = useRef(0);
   const keyboardHeightRef = useRef(0);
@@ -204,8 +208,10 @@ const TaskDetailModal = ({
 
   useEffect(() => {
     if (!visible) {
+      setErrorMsg('');
       return;
     }
+    setErrorMsg('');
     if (isCreate) {
       setTitle('');
       setDescription('');
@@ -256,8 +262,9 @@ const TaskDetailModal = ({
   }, [allowMultipleAssignees, assignee, employeeOptions, selectedAssigneeIds]);
 
   const handleSave = async () => {
+    setErrorMsg('');
     if (!title.trim()) {
-      Alert.alert('Required', 'Please enter a task title.');
+      setErrorMsg('Please enter a task title (*).');
       return;
     }
 
@@ -266,7 +273,7 @@ const TaskDetailModal = ({
       : normalizeAssigneeIds(selectedAssigneeIds, currentUserId || task?.assigneeId);
 
     if (resolvedAssigneeIds.length === 0) {
-      Alert.alert('Required', TASK_ASSIGNEE_REQUIRED);
+      setErrorMsg(TASK_ASSIGNEE_REQUIRED + ' (*)');
       return;
     }
 
@@ -335,16 +342,23 @@ const TaskDetailModal = ({
                 <View ref={titleFieldRef} collapsable={false}>
                   <Text style={styles.label}>{TASK_TITLE_LABEL} *</Text>
                   <TextInput
-                    style={styles.input}
-                    value={title}
-                    onChangeText={setTitle}
-                    onFocus={() => scrollFieldIntoView(titleFieldRef)}
+                    ref={titleInputRef}
+                    style={[styles.input, errorMsg && !title.trim() ? styles.inputError : null]}
                     placeholder={TASK_TITLE_PLACEHOLDER}
                     placeholderTextColor={darkPlaceholderColor}
+                    value={title}
+                    onChangeText={setTitle}
                   />
+                  {errorMsg && !title.trim() && <Text style={styles.errorText}>{errorMsg}</Text>}
                 </View>
 
-                {allowMultipleAssignees ? (
+                {/* Assignee Section */}
+                <View style={styles.section}>
+                  <Text style={styles.label}>
+                    {allowMultipleAssignees ? TASK_ASSIGNEES_LABEL : TASK_ASSIGNEE_LABEL} *
+                  </Text>
+                  <View style={[(errorMsg && allowMultipleAssignees && selectedAssigneeIds.length === 0) || (errorMsg && !allowMultipleAssignees && !assignee) ? styles.dropdownError : null]}>
+                  {allowMultipleAssignees ? (
                   <MultiSelectDropdown
                     label={TASK_ASSIGNEES_LABEL}
                     required
@@ -356,7 +370,6 @@ const TaskDetailModal = ({
                   />
                 ) : (
                   <>
-                    <Text style={styles.label}>{TASK_ASSIGNEE_LABEL} *</Text>
                     <TextInput
                       style={[styles.input, styles.readonlyInput]}
                       value={assignee}
@@ -365,8 +378,13 @@ const TaskDetailModal = ({
                     />
                   </>
                 )}
+                </View>
+                {errorMsg && ((allowMultipleAssignees && selectedAssigneeIds.length === 0) || (!allowMultipleAssignees && !assignee)) && (
+                  <Text style={styles.errorText}>{errorMsg}</Text>
+                )}
+              </View>
 
-                <View style={styles.row}>
+              <View style={styles.row}>
                   <DropdownSelect
                     label={TASK_STATUS_LABEL}
                     value={status}
@@ -428,7 +446,7 @@ const TaskDetailModal = ({
                   />
                 </View>
               </ScrollView>
-
+              
               <View style={styles.actions}>
                 <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                   <Text style={styles.cancelText}>{TASK_CANCEL_BUTTON}</Text>
@@ -631,4 +649,7 @@ const styles = StyleSheet.create({
     borderRadius: wp(3),
     overflow: 'hidden',
   },
+  inputError: { borderColor: '#E74C3C', borderWidth: 1 },
+  dropdownError: { borderColor: '#E74C3C', borderWidth: 1, borderRadius: wp(3), padding: wp(1) },
+  errorText: { color: '#E74C3C', ...style.fontSizeSmall, marginTop: hp(1), marginBottom: hp(1), textAlign: 'left' }
 });

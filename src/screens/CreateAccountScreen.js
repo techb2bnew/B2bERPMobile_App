@@ -220,7 +220,7 @@ const CreateAccountScreen = () => {
                             required
                             value={workEmail}
                             onChangeText={text => {
-                                setWorkEmail(text);
+                                setWorkEmail(text.toLowerCase());
                                 clearFieldError('workEmail');
                             }}
                             placeholder={WORK_EMAIL_PLACEHOLDER}

@@ -15,6 +15,11 @@ import TimeSheetScreen from '../screens/main/TimeSheetScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
 import ApplyLeaveScreen from '../screens/main/ApplyLeaveScreen';
 import ShiftTrackerScreen from '../screens/main/ShiftTrackerScreen';
+import HrmsScreen from '../screens/main/HrmsScreen';
+import HrOverviewScreen from '../screens/main/HrOverviewScreen';
+import RecruiterDashboardScreen from '../screens/main/RecruiterDashboardScreen';
+import AtsJobsScreen from '../screens/main/AtsJobsScreen';
+import AtsPipelineScreen from '../screens/main/AtsPipelineScreen';
 import { MAIN_ROUTES } from './routes';
 
 const Stack = createNativeStackNavigator();
@@ -85,6 +90,31 @@ const MainStackNavigator = () => {
           name={MAIN_ROUTES.SHIFT_TRACKER}
           component={ShiftTrackerScreen}
           listeners={focusListener(MAIN_ROUTES.SHIFT_TRACKER, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.HRMS}
+          component={HrmsScreen}
+          listeners={focusListener(MAIN_ROUTES.HRMS, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.HR_OVERVIEW}
+          component={HrOverviewScreen}
+          listeners={focusListener(MAIN_ROUTES.HR_OVERVIEW, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.RECRUITER_DASHBOARD}
+          component={RecruiterDashboardScreen}
+          listeners={focusListener(MAIN_ROUTES.RECRUITER_DASHBOARD, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.ATS_JOBS}
+          component={AtsJobsScreen}
+          listeners={focusListener(MAIN_ROUTES.ATS_JOBS, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.ATS_PIPELINE}
+          component={AtsPipelineScreen}
+          listeners={focusListener(MAIN_ROUTES.ATS_PIPELINE, setActiveRoute)}
         />
       </Stack.Navigator>
       <CustomDrawer />

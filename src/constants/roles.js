@@ -9,14 +9,20 @@ export const CHANGE_ROLE = 'Change role';
 export const EMPLOYEE_ROLE_ID = 'employee';
 export const TEAM_LEADER_ROLE_ID = 'team_leader';
 export const CEO_ADMIN_ROLE_ID = 'ceo_admin';
+export const HR_MANAGER_ROLE_ID = 'hr_manager';
 
 export const LOGIN_ENABLED_ROLE_IDS = [
   EMPLOYEE_ROLE_ID,
   TEAM_LEADER_ROLE_ID,
   CEO_ADMIN_ROLE_ID,
+  HR_MANAGER_ROLE_ID,
 ];
 
-export const REVIEWER_ROLE_IDS = [TEAM_LEADER_ROLE_ID, CEO_ADMIN_ROLE_ID];
+export const REVIEWER_ROLE_IDS = [
+  TEAM_LEADER_ROLE_ID,
+  CEO_ADMIN_ROLE_ID,
+  HR_MANAGER_ROLE_ID,
+];
 
 const normalizeProfileRole = role =>
   String(role || '')
@@ -74,10 +80,21 @@ const CEO_PROFILE_ROLES = new Set([
   'company admin',
 ]);
 
+const HR_MANAGER_PROFILE_ROLES = new Set([
+  'hr manager',
+  'hr',
+  'human resources',
+  'human resource manager',
+  'hr_manager',
+  'hr coordinator',
+  'hr executive',
+]);
+
 const PROFILE_ROLE_SETS_BY_LOGIN = {
   [EMPLOYEE_ROLE_ID]: EMPLOYEE_PROFILE_ROLES,
   [TEAM_LEADER_ROLE_ID]: TEAM_LEADER_PROFILE_ROLES,
   [CEO_ADMIN_ROLE_ID]: CEO_PROFILE_ROLES,
+  [HR_MANAGER_ROLE_ID]: HR_MANAGER_PROFILE_ROLES,
 };
 
 export const getLoginCategoryForProfileRole = profileRole => {
@@ -97,6 +114,10 @@ export const getLoginCategoryForProfileRole = profileRole => {
 
   if (CEO_PROFILE_ROLES.has(normalized)) {
     return CEO_ADMIN_ROLE_ID;
+  }
+
+  if (HR_MANAGER_PROFILE_ROLES.has(normalized)) {
+    return HR_MANAGER_ROLE_ID;
   }
 
   return null;
@@ -141,7 +162,11 @@ export const isReviewerUser = user => {
   }
 
   const profileCategory = getLoginCategoryForProfileRole(user?.role);
-  return profileCategory === TEAM_LEADER_ROLE_ID || profileCategory === CEO_ADMIN_ROLE_ID;
+  return (
+    profileCategory === TEAM_LEADER_ROLE_ID ||
+    profileCategory === CEO_ADMIN_ROLE_ID ||
+    profileCategory === HR_MANAGER_ROLE_ID
+  );
 };
 
 export const isTeamLeaderUser = user => {
@@ -162,6 +187,16 @@ export const isCeoAdminUser = user => {
   }
 
   return getLoginCategoryForProfileRole(user?.role) === CEO_ADMIN_ROLE_ID;
+};
+
+export const isHrManagerUser = user => {
+  const { selectedRoleId } = getUserRoleIds(user);
+
+  if (selectedRoleId === HR_MANAGER_ROLE_ID) {
+    return true;
+  }
+
+  return getLoginCategoryForProfileRole(user?.role) === HR_MANAGER_ROLE_ID;
 };
 
 export const getCabinAlertMessage = user =>

@@ -17,4 +17,9 @@ export const MAIN_ROUTES = {
   PROFILE: 'Profile',
   APPLY_LEAVE: 'ApplyLeave',
   SHIFT_TRACKER: 'ShiftTracker',
+  HRMS: 'HRMS',
+  HR_OVERVIEW: 'HrOverview',
+  RECRUITER_DASHBOARD: 'RecruiterDashboard',
+  ATS_JOBS: 'AtsJobs',
+  ATS_PIPELINE: 'AtsPipeline',
 };

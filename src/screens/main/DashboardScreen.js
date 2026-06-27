@@ -74,6 +74,7 @@ import { subscribeToProjectsChanges } from '../../services/projectsService';
 import { buildEmployeeNameMap } from '../../utils/projectUtils';
 import { useWeeklyHours } from '../../hooks/useWeeklyHours';
 import { getLocalDateKey } from '../../services/clockSessionsService';
+import { normalizeDepartmentName } from '../../services/hrmsService';
 import {
   getFirstName,
   heightPercentageToDP as hp,
@@ -288,7 +289,7 @@ const DashboardScreen = () => {
             const profile = profileMap[session.employee_id] || {};
             return {
               ...session,
-              employee_dept: profile.dept || 'General',
+              employee_dept: normalizeDepartmentName(profile.dept),
               segments: (rawSegments || []).filter(seg => seg.session_id === session.id)
             };
           });

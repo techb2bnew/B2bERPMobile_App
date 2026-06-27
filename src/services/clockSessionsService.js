@@ -151,7 +151,19 @@ export const buildCurrentWeekDays = () => {
   monday.setHours(0, 0, 0, 0);
   monday.setDate(now.getDate() + diffToMonday);
 
-  return WEEKDAY_LABELS.map((day, index) => {
+  const labels = [...WEEKDAY_LABELS];
+
+  const saturday = new Date(monday);
+  saturday.setDate(monday.getDate() + 5);
+  
+  const nextWeekSaturday = new Date(saturday);
+  nextWeekSaturday.setDate(saturday.getDate() + 7);
+  
+  if (saturday.getMonth() !== nextWeekSaturday.getMonth()) {
+    labels.push('Sat');
+  }
+
+  return labels.map((day, index) => {
     const date = new Date(monday);
     date.setDate(monday.getDate() + index);
     return {
@@ -482,4 +494,48 @@ export const subscribeToEmployeeClockSessions = (employeeId, onChange) => {
     }
     teardownChannel();
   };
+};
+
+export const fetchActiveEmployeeStatuses = async () => {
+  if (!isSupabaseConfigured) return {};
+  try {
+    const supabase = getSupabase();
+    // Fetch all active sessions
+    const { data: activeSessions, error: sessionErr } = await supabase
+      .from(CLOCK_SESSIONS_TABLE)
+      .select('id, employee_id, clock_in')
+      .is('clock_out', null);
+
+    if (sessionErr) throw sessionErr;
+
+    if (!activeSessions || activeSessions.length === 0) return {};
+
+    const sessionIds = activeSessions.map(s => s.id);
+
+    // Fetch active segments for those sessions
+    const { data: activeSegments, error: segmentErr } = await supabase
+      .from('clock_session_segments')
+      .select('session_id, kind, label')
+      .in('session_id', sessionIds)
+      .is('ended_at', null);
+
+    if (segmentErr) throw segmentErr;
+
+    const statusMap = {};
+    activeSessions.forEach(session => {
+      const segment = activeSegments?.find(seg => seg.session_id === session.id);
+      let status = 'Live'; // default if clocked in
+      let label = '';
+      if (segment && segment.kind === 'break') {
+        status = (segment.label || '').toLowerCase().includes('lunch') ? 'On Lunch' : 'On Break';
+        label = segment.label;
+      }
+      statusMap[session.employee_id] = { status, label };
+    });
+
+    return statusMap;
+  } catch (err) {
+    console.error('Error fetching active employee statuses:', err);
+    return {};
+  }
 };

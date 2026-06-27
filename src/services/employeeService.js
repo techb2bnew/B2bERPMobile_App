@@ -1,3 +1,4 @@
+/* global crypto */
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { EMAIL_ALREADY_EXISTS } from '../constants/Constants';
 import {
@@ -5,6 +6,7 @@ import {
   profileMatchesLoginRole,
 } from '../constants/roles';
 import { signInWithEmail, signOut, signUpWithEmail } from './authService';
+import { normalizeDepartmentName } from './hrmsService';
 
 const EMPLOYEE_PROFILES_TABLE = 'employee_profiles';
 
@@ -31,7 +33,7 @@ const buildRegisterPayload = ({
     role: selectedRole?.id || '',
     full_name: fullName.trim(),
     phone: phoneNumber.trim(),
-    department: department.trim(),
+    department: normalizeDepartmentName(department),
     designation: roleDesignation.trim(),
     employee_id: employeeId.trim() || '',
   },
@@ -97,7 +99,7 @@ export const fetchAllEmployeeProfiles = async () => {
 
   const { data, error } = await getSupabase()
     .from(EMPLOYEE_PROFILES_TABLE)
-    .select('id, name, email, phone, role, app_role, profile_image_url, avatar')
+    .select('id, name, email, phone, role, app_role, profile_image_url, avatar, dept')
     .order('name');
 
   if (error) {
@@ -295,4 +297,23 @@ export const loginEmployee = async ({ email, password, selectedRole }) => {
     auth: authData,
     profile,
   };
+};
+
+export const updateEmployeeProfile = async (profileId, updateData) => {
+  if (!isSupabaseConfigured || !profileId) {
+    throw new Error('Supabase is not configured or profileId is missing');
+  }
+
+  const { data, error } = await getSupabase()
+    .from(EMPLOYEE_PROFILES_TABLE)
+    .update(updateData)
+    .eq('id', profileId)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'Failed to update employee profile');
+  }
+
+  return data;
 };

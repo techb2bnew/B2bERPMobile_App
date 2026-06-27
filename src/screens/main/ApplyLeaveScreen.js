@@ -38,6 +38,7 @@ import {
   EMPLOYEE_ROLE_ID,
   isReviewerUser,
   isCeoAdminUser,
+  isHrManagerUser,
 } from '../../constants/roles';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
@@ -329,10 +330,11 @@ const AnalogClockPickerModal = ({
 const ApplyLeaveScreen = () => {
   const navigation = useNavigation();
   const { user } = useAuth();
-  const isCeo = isCeoAdminUser(user);
   const userId = user?.id;
   const userName = user?.name;
+  const isCeo = isCeoAdminUser(user);
   const isReviewer = isReviewerUser(user);
+  const isHr = isHrManagerUser(user);
 
   // Navigation View State ('list' shows applied leaves, 'form' shows apply form)
   const [currentView, setCurrentView] = useState('list');
@@ -1153,33 +1155,37 @@ const ApplyLeaveScreen = () => {
               {isRangeType(leaveType) && (
                 <View style={styles.dateFieldsContainer}>
                   <View style={styles.dateRow}>
-                    <TouchableOpacity
-                      style={[styles.dateField, errors.startDate && styles.dateFieldInputError]}
-                      onPress={() => openCalendar('single', 'start')}
-                      activeOpacity={0.85}>
-                      <Text style={styles.fieldLabel}>Start Date *</Text>
-                      <View style={styles.dateValueContainer}>
-                        <Text style={startDate ? styles.dateValueText : styles.datePlaceholderText}>
-                          {startDate ? formatDateDisplay(startDate) : 'Select Start'}
-                        </Text>
-                        <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
-                      </View>
+                    <View style={{ flex: 1 }}>
+                      <TouchableOpacity
+                        style={[styles.dateField, errors.startDate && styles.dateFieldInputError]}
+                        onPress={() => openCalendar('single', 'start')}
+                        activeOpacity={0.85}>
+                        <Text style={styles.fieldLabel}>Start Date *</Text>
+                        <View style={styles.dateValueContainer}>
+                          <Text style={startDate ? styles.dateValueText : styles.datePlaceholderText}>
+                            {startDate ? formatDateDisplay(startDate) : 'Select Start'}
+                          </Text>
+                          <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
+                        </View>
+                      </TouchableOpacity>
                       {errors.startDate ? <Text style={styles.errorText}>{errors.startDate}</Text> : null}
-                    </TouchableOpacity>
+                    </View>
 
-                    <TouchableOpacity
-                      style={[styles.dateField, errors.endDate && styles.dateFieldInputError]}
-                      onPress={() => openCalendar('single', 'end')}
-                      activeOpacity={0.85}>
-                      <Text style={styles.fieldLabel}>End Date *</Text>
-                      <View style={styles.dateValueContainer}>
-                        <Text style={endDate ? styles.dateValueText : styles.datePlaceholderText}>
-                          {endDate ? formatDateDisplay(endDate) : 'Select End'}
-                        </Text>
-                        <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
-                      </View>
+                    <View style={{ flex: 1 }}>
+                      <TouchableOpacity
+                        style={[styles.dateField, errors.endDate && styles.dateFieldInputError]}
+                        onPress={() => openCalendar('single', 'end')}
+                        activeOpacity={0.85}>
+                        <Text style={styles.fieldLabel}>End Date *</Text>
+                        <View style={styles.dateValueContainer}>
+                          <Text style={endDate ? styles.dateValueText : styles.datePlaceholderText}>
+                            {endDate ? formatDateDisplay(endDate) : 'Select End'}
+                          </Text>
+                          <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
+                        </View>
+                      </TouchableOpacity>
                       {errors.endDate ? <Text style={styles.errorText}>{errors.endDate}</Text> : null}
-                    </TouchableOpacity>
+                    </View>
                   </View>
 
                   {/* Display calculated duration */}
@@ -1200,19 +1206,21 @@ const ApplyLeaveScreen = () => {
               {/* Half Day */}
               {leaveType === 'Half Day' && (
                 <View style={styles.halfDayContainer}>
-                  <TouchableOpacity
-                    style={[styles.singleDateField, errors.singleDate && styles.dateFieldInputError]}
-                    onPress={() => openCalendar('single', 'single')}
-                    activeOpacity={0.85}>
-                    <Text style={styles.fieldLabel}>Date *</Text>
-                    <View style={styles.dateValueContainer}>
-                      <Text style={singleDate ? styles.dateValueText : styles.datePlaceholderText}>
-                        {singleDate ? formatDateDisplay(singleDate) : 'Select Date'}
-                      </Text>
-                      <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
-                    </View>
+                  <View style={{ marginBottom: hp(2.4) }}>
+                    <TouchableOpacity
+                      style={[styles.singleDateField, errors.singleDate && styles.dateFieldInputError]}
+                      onPress={() => openCalendar('single', 'single')}
+                      activeOpacity={0.85}>
+                      <Text style={styles.fieldLabel}>Date *</Text>
+                      <View style={styles.dateValueContainer}>
+                        <Text style={singleDate ? styles.dateValueText : styles.datePlaceholderText}>
+                          {singleDate ? formatDateDisplay(singleDate) : 'Select Date'}
+                        </Text>
+                        <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
+                      </View>
+                    </TouchableOpacity>
                     {errors.singleDate ? <Text style={styles.errorText}>{errors.singleDate}</Text> : null}
-                  </TouchableOpacity>
+                  </View>
 
                   <DropdownSelect
                     label="Half Day Type"
@@ -1228,33 +1236,37 @@ const ApplyLeaveScreen = () => {
               {/* Short Leave */}
               {leaveType === 'Short Leave' && (
                 <View style={styles.shortLeaveContainer}>
-                  <TouchableOpacity
-                    style={[styles.singleDateField, errors.singleDate && styles.dateFieldInputError]}
-                    onPress={() => openCalendar('single', 'single')}
-                    activeOpacity={0.85}>
-                    <Text style={styles.fieldLabel}>Date *</Text>
-                    <View style={styles.dateValueContainer}>
-                      <Text style={singleDate ? styles.dateValueText : styles.datePlaceholderText}>
-                        {singleDate ? formatDateDisplay(singleDate) : 'Select Date'}
-                      </Text>
-                      <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
-                    </View>
-                    {errors.singleDate ? <Text style={styles.errorText}>{errors.singleDate}</Text> : null}
-                  </TouchableOpacity>
-
-                  <View style={styles.dateRow}>
+                  <View style={{ marginBottom: hp(2.4) }}>
                     <TouchableOpacity
-                      style={[styles.dateField, styles.timePickerField]}
-                      onPress={() => openClockPicker('start')}
+                      style={[styles.singleDateField, errors.singleDate && styles.dateFieldInputError]}
+                      onPress={() => openCalendar('single', 'single')}
                       activeOpacity={0.85}>
-                      <Text style={styles.fieldLabel}>Start Time *</Text>
+                      <Text style={styles.fieldLabel}>Date *</Text>
                       <View style={styles.dateValueContainer}>
-                        <Text style={styles.dateValueText}>{startTime}</Text>
-                        <Icon name="clock" size={wp(4.5)} color={darkTextSecondaryColor} />
+                        <Text style={singleDate ? styles.dateValueText : styles.datePlaceholderText}>
+                          {singleDate ? formatDateDisplay(singleDate) : 'Select Date'}
+                        </Text>
+                        <Icon name="calendar" size={wp(4.5)} color={darkTextSecondaryColor} />
                       </View>
                     </TouchableOpacity>
+                    {errors.singleDate ? <Text style={styles.errorText}>{errors.singleDate}</Text> : null}
+                  </View>
 
-                    <View style={styles.endTimeWrapper}>
+                  <View style={styles.dateRow}>
+                    <View style={{ flex: 1 }}>
+                      <TouchableOpacity
+                        style={[styles.dateField, styles.timePickerField]}
+                        onPress={() => openClockPicker('start')}
+                        activeOpacity={0.85}>
+                        <Text style={styles.fieldLabel}>Start Time *</Text>
+                        <View style={styles.dateValueContainer}>
+                          <Text style={styles.dateValueText}>{startTime}</Text>
+                          <Icon name="clock" size={wp(4.5)} color={darkTextSecondaryColor} />
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={{ flex: 1 }}>
                       <TouchableOpacity
                         style={[
                           styles.dateField,
@@ -1269,7 +1281,7 @@ const ApplyLeaveScreen = () => {
                           <Icon name="clock" size={wp(4.5)} color={darkTextSecondaryColor} />
                         </View>
                       </TouchableOpacity>
-                      {errors.endTime ? <Text style={styles.endTimeError}>{errors.endTime}</Text> : null}
+                      {errors.endTime ? <Text style={styles.errorText}>{errors.endTime}</Text> : null}
                     </View>
                   </View>
                 </View>
@@ -1291,24 +1303,27 @@ const ApplyLeaveScreen = () => {
                 <Text style={styles.charCounter}>{reason.length} chars</Text>
               </View>
 
-              <View style={[
-                styles.reasonInputWrapper,
-                errors.reason && styles.reasonInputWrapperError
-              ]}>
-                <TextInput
-                  value={reason}
-                  onChangeText={(text) => {
-                    setReason(text);
-                    setErrors(prev => ({ ...prev, reason: null }));
-                  }}
-                  placeholder="Explain the detailed reason for this leave request..."
-                  placeholderTextColor={darkPlaceholderColor}
-                  multiline
-                  numberOfLines={5}
-                  style={styles.reasonTextInput}
-                />
+              <View style={{ marginBottom: hp(2) }}>
+                <View style={[
+                  styles.reasonInputWrapper,
+                  { marginBottom: 0 },
+                  errors.reason && styles.reasonInputWrapperError
+                ]}>
+                  <TextInput
+                    value={reason}
+                    onChangeText={(text) => {
+                      setReason(text);
+                      setErrors(prev => ({ ...prev, reason: null }));
+                    }}
+                    placeholder="Explain the detailed reason for this leave request..."
+                    placeholderTextColor={darkPlaceholderColor}
+                    multiline
+                    numberOfLines={5}
+                    style={styles.reasonTextInput}
+                  />
+                </View>
+                {errors.reason ? <Text style={styles.errorText}>{errors.reason}</Text> : null}
               </View>
-              {errors.reason ? <Text style={styles.errorText}>{errors.reason}</Text> : null}
 
               {/* Submit Error */}
               {errors.submit ? (
@@ -1600,7 +1615,7 @@ const ApplyLeaveScreen = () => {
                 )}
               </ScrollView>
 
-              {activeTab === 'approvals' && String(selectedLeave.status || '').toLowerCase() === 'pending' ? (
+              {activeTab === 'approvals' && String(selectedLeave.status || '').toLowerCase() === 'pending' && !isHr ? (
                 <View style={styles.approvalActionsRow}>
                   <TouchableOpacity
                     style={[styles.approvalBtn, styles.rejectBtn]}

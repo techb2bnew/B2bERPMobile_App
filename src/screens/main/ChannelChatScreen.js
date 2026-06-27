@@ -55,6 +55,7 @@ import { style } from '../../constants/Fonts';
 import { useAuth } from '../../context/AuthContext';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import {
+  fetchChannelMembersList,
   fetchChannelMemberLastReadAt,
   fetchChannelMessages,
   isMessageReadByPeer,
@@ -63,6 +64,7 @@ import {
   sendChannelMessage,
   subscribeToChannelMessages,
   subscribeToChannelReads,
+  toggleMessageReaction,
 } from '../../services/chatService';
 import { getEmployeeProfileById } from '../../services/employeeService';
 import { resolveMessageTypeForContent, uploadChatMedia } from '../../services/chatMediaService';
@@ -152,6 +154,12 @@ const ChannelChatScreen = () => {
   const [attachOpen, setAttachOpen] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [peerLastReadAt, setPeerLastReadAt] = useState(null);
+  
+  // New States for Members & Reactions
+  const [membersList, setMembersList] = useState([]);
+  const [membersModalVisible, setMembersModalVisible] = useState(false);
+  const [reactionsModalVisible, setReactionsModalVisible] = useState(false);
+  const [selectedMessageForReaction, setSelectedMessageForReaction] = useState(null);
 
   const isBusy = sending || uploadingMedia;
 
@@ -187,6 +195,12 @@ const ChannelChatScreen = () => {
         return current;
       }
       return [...current, newMessage];
+    });
+  }, []);
+
+  const updateMessage = useCallback(updatedMessage => {
+    setMessages(current => {
+      return current.map(item => (item.id === updatedMessage.id ? updatedMessage : item));
     });
   }, []);
 
@@ -269,17 +283,24 @@ const ChannelChatScreen = () => {
       return undefined;
     }
 
-    return subscribeToChannelMessages(effectiveChannelId, newMessage => {
-      appendMessage(newMessage);
-      if (user?.id) {
-        markChannelAsRead({ channelId: effectiveChannelId, userId: user.id }).catch(() => {});
+    return subscribeToChannelMessages(
+      effectiveChannelId,
+      newMessage => {
+        appendMessage(newMessage);
+        if (user?.id) {
+          markChannelAsRead({ channelId: effectiveChannelId, userId: user.id }).catch(() => {});
+        }
+        if (isDirect && peerId && newMessage.senderId === peerId) {
+          scheduleReadReceiptRefresh();
+        }
+      },
+      updatedMessage => {
+        updateMessage(updatedMessage);
       }
-      if (isDirect && peerId && newMessage.senderId === peerId) {
-        scheduleReadReceiptRefresh();
-      }
-    });
+    );
   }, [
     appendMessage,
+    updateMessage,
     effectiveChannelId,
     isDirect,
     peerId,
@@ -570,24 +591,43 @@ const ChannelChatScreen = () => {
     scheduleMediaPicker(type);
   };
 
+  const renderReactions = (reactions, isOwn = false, isBroadcast = false) => {
+    if (!reactions || Object.keys(reactions).length === 0) return null;
+    return (
+      <View style={[styles.reactionsRow, isOwn ? styles.reactionsRowOwn : styles.reactionsRowOther, isBroadcast && styles.reactionsRowBroadcast]}>
+        {Object.entries(reactions).map(([emoji, users]) => (
+          <View key={emoji} style={[styles.reactionBadge, users.includes(user?.id) && styles.reactionBadgeActive]}>
+            <Text style={styles.reactionBadgeEmoji}>{emoji}</Text>
+            {users.length > 1 && <Text style={styles.reactionBadgeCount}>{users.length}</Text>}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   const renderMessage = (item, index, list) => {
     const isOwn = item.senderId === user?.id;
     const clusterStart = isClusterStart(list, index);
     const showAvatar = shouldShowAvatar(list, index, user?.id);
     const marginTop = clusterStart ? hp(1.2) : hp(0.35);
+    const hasReactions = item.reactions && Object.keys(item.reactions).length > 0;
+    const marginBottom = hasReactions ? hp(1.5) : 0;
 
     if (item.isBroadcast) {
       return (
-        <View key={item.id} style={[styles.broadcastRow, { marginTop }]}>
-          <View style={styles.broadcastHeader}>
-            <ChatMessageAvatar message={item} />
-            <Text style={styles.broadcastName}>{item.name}</Text>
-            <View style={styles.broadcastBadge}>
-              <Text style={styles.broadcastBadgeText}>{CHAT_BROADCAST_LABEL}</Text>
+        <View key={item.id} style={{ marginBottom }}>
+          <TouchableOpacity style={[styles.broadcastRow, { marginTop }]} activeOpacity={0.8} onLongPress={() => { setSelectedMessageForReaction(item); setReactionsModalVisible(true); }}>
+            <View style={styles.broadcastHeader}>
+              <ChatMessageAvatar message={item} />
+              <Text style={styles.broadcastName}>{item.name}</Text>
+              <View style={styles.broadcastBadge}>
+                <Text style={styles.broadcastBadgeText}>{CHAT_BROADCAST_LABEL}</Text>
+              </View>
             </View>
-          </View>
-          <ChatMessageContent message={item} isOwn={false} />
-          <Text style={styles.broadcastTime}>{item.time}</Text>
+            <ChatMessageContent message={item} isOwn={false} />
+            <Text style={styles.broadcastTime}>{item.time}</Text>
+          </TouchableOpacity>
+          {renderReactions(item.reactions, false, true)}
         </View>
       );
     }
@@ -597,35 +637,41 @@ const ChannelChatScreen = () => {
         isDirect && isMessageReadByPeer(item.createdAt, peerLastReadAt);
 
       return (
-        <View key={item.id} style={[styles.ownRow, { marginTop }]}>
-          <View style={[styles.ownBubble, !clusterStart && styles.ownBubbleStacked]}>
-          <View style={styles.bubbleInner}>
-            <ChatMessageContent message={item} isOwn />
-            <View style={styles.ownMetaRow}>
-              <Text style={styles.ownTime}>{item.time}</Text>
-              {isDirect ? <ChatReadReceipt read={isRead} /> : null}
-            </View>
-          </View>
+        <View key={item.id} style={[styles.ownRow, { marginTop, marginBottom }]}>
+          <View style={{ flexDirection: 'column', alignItems: 'flex-end' }}>
+            <TouchableOpacity style={[styles.ownBubble, !clusterStart && styles.ownBubbleStacked]} activeOpacity={0.9} onLongPress={() => { setSelectedMessageForReaction(item); setReactionsModalVisible(true); }}>
+              <View style={styles.bubbleInner}>
+                <ChatMessageContent message={item} isOwn />
+                <View style={styles.ownMetaRow}>
+                  <Text style={styles.ownTime}>{item.time}</Text>
+                  {isDirect ? <ChatReadReceipt read={isRead} /> : null}
+                </View>
+              </View>
+            </TouchableOpacity>
+            {renderReactions(item.reactions, true)}
           </View>
         </View>
       );
     }
 
     return (
-      <View key={item.id} style={[styles.otherRow, { marginTop }]}>
+      <View key={item.id} style={[styles.otherRow, { marginTop, marginBottom }]}>
         {showAvatar ? (
           <ChatMessageAvatar message={item} />
         ) : (
           <View style={styles.avatarSpacer} />
         )}
-        <View style={[styles.otherBubble, !clusterStart && styles.otherBubbleStacked]}>
-          {!isDirect && clusterStart ? (
-            <Text style={styles.otherName}>{item.name}</Text>
-          ) : null}
-          <View style={styles.bubbleInner}>
-            <ChatMessageContent message={item} isOwn={false} />
-            <Text style={styles.otherTime}>{item.time}</Text>
-          </View>
+        <View style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+          <TouchableOpacity style={[styles.otherBubble, !clusterStart && styles.otherBubbleStacked]} activeOpacity={0.9} onLongPress={() => { setSelectedMessageForReaction(item); setReactionsModalVisible(true); }}>
+            {!isDirect && clusterStart ? (
+              <Text style={styles.otherName}>{item.name}</Text>
+            ) : null}
+            <View style={styles.bubbleInner}>
+              <ChatMessageContent message={item} isOwn={false} />
+              <Text style={styles.otherTime}>{item.time}</Text>
+            </View>
+          </TouchableOpacity>
+          {renderReactions(item.reactions, false)}
         </View>
       </View>
     );
@@ -677,7 +723,19 @@ const ChannelChatScreen = () => {
           <UserAvatar userId={peerId} name={resolvedChatName} size={wp(9)} />
         ) : null}
 
-        <View style={styles.headerCenter}>
+        <TouchableOpacity
+          style={styles.headerCenter}
+          disabled={isDirect}
+          activeOpacity={0.7}
+          onPress={async () => {
+            if (!isDirect && effectiveChannelId) {
+              setLoading(true);
+              const list = await fetchChannelMembersList(effectiveChannelId);
+              setMembersList(list);
+              setLoading(false);
+              setMembersModalVisible(true);
+            }
+          }}>
           <Text style={styles.channelTitle} numberOfLines={1}>
             {isDirect ? resolvedChatName : `# ${resolvedChatName}`}
           </Text>
@@ -688,7 +746,7 @@ const ChannelChatScreen = () => {
           ) : (
             <Text style={styles.memberCount}>Direct message</Text>
           )}
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.headerActions}>
           {isDirect ? (
@@ -822,6 +880,70 @@ const ChannelChatScreen = () => {
             <Text style={styles.uploadText}>{CHAT_UPLOADING_MEDIA}</Text>
           </View>
         </View>
+      </Modal>
+
+      {/* Members Modal */}
+      <Modal
+        visible={membersModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMembersModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Group Members ({membersList.length})</Text>
+              <TouchableOpacity onPress={() => setMembersModalVisible(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Icon name="x" size={wp(6)} color={darkTextSecondaryColor} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.membersScroll} showsVerticalScrollIndicator={false}>
+              {membersList.map((member, i) => (
+                <View key={i} style={styles.memberRow}>
+                  <UserAvatar userId={member.userId} name={member.name} imageUrl={member.avatarUrl} size={wp(10)} />
+                  <View style={styles.memberInfo}>
+                    <Text style={styles.memberName}>{member.name}</Text>
+                    <Text style={styles.memberRole}>{member.employeeRole || 'Member'}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Reactions Picker Modal */}
+      <Modal
+        visible={reactionsModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReactionsModalVisible(false)}>
+        <TouchableOpacity style={styles.reactionsOverlay} activeOpacity={1} onPress={() => setReactionsModalVisible(false)}>
+          <View style={styles.reactionsPicker}>
+            <Text style={styles.reactionsPickerTitle}>React to Message</Text>
+            <View style={styles.emojisContainer}>
+              {['👍', '❤️', '😂', '🎉', '😢', '👎'].map(emoji => (
+                <TouchableOpacity
+                  key={emoji}
+                  style={styles.emojiButton}
+                  onPress={async () => {
+                    const msg = selectedMessageForReaction;
+                    setReactionsModalVisible(false);
+                    if (msg && user?.id) {
+                      await toggleMessageReaction({
+                        messageId: msg.id,
+                        userId: user.id,
+                        emoji,
+                        messageSenderId: msg.senderId,
+                        messageContent: msg.text,
+                      });
+                    }
+                  }}>
+                  <Text style={styles.emojiText}>{emoji}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
@@ -1080,38 +1202,159 @@ const styles = StyleSheet.create({
     color: darkTextPrimaryColor,
   },
   sendButton: {
-    width: wp(10.5),
-    height: wp(10.5),
-    borderRadius: wp(5.25),
+    width: wp(10),
+    height: wp(10),
+    borderRadius: wp(5),
     backgroundColor: PURPLE,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: hp(0.15),
   },
   sendButtonDisabled: {
-    opacity: 0.45,
+    backgroundColor: darkSurfaceColor,
   },
   uploadOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: wp(8),
   },
   uploadCard: {
     backgroundColor: darkSurfaceColor,
-    borderRadius: wp(4),
-    borderWidth: 1,
-    borderColor: darkBorderColor,
-    paddingHorizontal: wp(8),
-    paddingVertical: hp(3),
-    alignItems: 'center',
-    gap: hp(1.5),
     minWidth: wp(55),
+    padding: wp(5),
+    borderRadius: wp(3),
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   uploadText: {
     ...style.fontSizeNormal,
+    color: darkTextPrimaryColor,
+    marginTop: hp(2),
+  },
+  reactionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: wp(1),
+    marginTop: -hp(1),
+    zIndex: 10,
+    elevation: 3,
+  },
+  reactionsRowOwn: {
+    alignSelf: 'flex-end',
+    marginRight: wp(3),
+  },
+  reactionsRowOther: {
+    alignSelf: 'flex-start',
+    marginLeft: wp(3),
+  },
+  reactionsRowBroadcast: {
+    alignSelf: 'flex-start',
+    marginLeft: wp(15),
+  },
+  reactionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: darkSurfaceColor,
+    borderRadius: wp(3),
+    paddingHorizontal: wp(1.5),
+    paddingVertical: hp(0.2),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+  },
+  reactionBadgeActive: {
+    backgroundColor: PURPLE,
+    borderColor: 'rgba(255,255,255,0.4)',
+    borderWidth: 1,
+  },
+  reactionBadgeEmoji: {
+    fontSize: wp(3.5),
+  },
+  reactionBadgeCount: {
+    ...style.fontSizeSmall,
+    color: darkTextPrimaryColor,
+    marginLeft: wp(1),
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: darkSurfaceColor,
+    borderTopLeftRadius: wp(5),
+    borderTopRightRadius: wp(5),
+    padding: wp(5),
+    maxHeight: hp(80),
+    minHeight: hp(40),
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: hp(2),
+  },
+  modalTitle: {
+    ...style.fontSizeLarge,
+    ...style.fontWeightMedium1x,
+    color: darkTextPrimaryColor,
+  },
+  membersScroll: {
+    flexGrow: 0,
+  },
+  memberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: hp(1.5),
+    borderBottomWidth: 1,
+    borderBottomColor: darkBorderColor,
+  },
+  memberInfo: {
+    marginLeft: wp(3),
+    flex: 1,
+  },
+  memberName: {
+    ...style.fontSizeNormal,
     ...style.fontWeightMedium,
     color: darkTextPrimaryColor,
+  },
+  memberRole: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+    marginTop: hp(0.3),
+    textTransform: 'capitalize',
+  },
+  reactionsOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  reactionsPicker: {
+    backgroundColor: darkSurfaceColor,
+    borderTopLeftRadius: wp(5),
+    borderTopRightRadius: wp(5),
+    padding: wp(5),
+    paddingBottom: hp(5),
+    width: '100%',
+    alignItems: 'center',
+  },
+  reactionsPickerTitle: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium1x,
+    color: darkTextPrimaryColor,
+    marginBottom: hp(2.5),
+  },
+  emojisContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingHorizontal: wp(5),
+  },
+  emojiButton: {
+    padding: wp(2),
+  },
+  emojiText: {
+    fontSize: wp(9),
   },
 });

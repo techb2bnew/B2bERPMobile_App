@@ -66,7 +66,7 @@ const TimeSheetScreen = () => {
     [dateRange.endDateKey, dateRange.startDateKey, isCurrentWeek],
   );
 
-  const useWideChart = rangeData.days.length > 5;
+  const useWideChart = rangeData.days.length > 6;
   const rangeTitle = isCurrentWeek
     ? TIME_SHEET_THIS_WEEK
     : rangeDisplay.isSingleDay

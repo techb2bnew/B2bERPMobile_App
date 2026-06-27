@@ -166,6 +166,7 @@ export const mapMessageRow = (row, profileMap = {}) => {
     fileName: row.file_name || null,
     fileSize: row.file_size || null,
     isBroadcast: Boolean(row.is_broadcast),
+    reactions: row.reactions || {},
     createdAt: row.created_at,
   };
 };
@@ -655,6 +656,117 @@ export const markChannelAsRead = async ({ channelId, userId }) => {
   syncAppIconBadge(userId).catch(() => {});
 };
 
+export const fetchChannelMembersList = async (channelId) => {
+  if (!isSupabaseConfigured || !channelId) {
+    return [];
+  }
+
+  const { data: membersData, error: membersError } = await getSupabase()
+    .from(MEMBERS_TABLE)
+    .select('user_id, role, joined_at')
+    .eq('channel_id', channelId);
+
+  if (membersError || !membersData) {
+    console.error('[chat] Error fetching members list:', membersError);
+    return [];
+  }
+
+  const userIds = membersData.map(m => m.user_id);
+  const profileMap = await fetchProfilesByIds(userIds);
+
+  return membersData.map(m => {
+    const profile = profileMap[m.user_id];
+    return {
+      userId: m.user_id,
+      role: m.role,
+      joinedAt: m.joined_at,
+      name: profile?.name || 'Unknown User',
+      avatarUrl: getEmployeeProfileImageUrl(profile) || profile?.profile_image_url || null,
+      employeeRole: profile?.role || 'Member',
+    };
+  });
+};
+
+export const toggleMessageReaction = async ({ messageId, userId, emoji, messageSenderId, messageContent }) => {
+  if (!isSupabaseConfigured || !messageId || !userId || !emoji) return;
+
+  const supabase = getSupabase();
+  
+  const { data: msgData, error: fetchErr } = await supabase
+    .from(MESSAGES_TABLE)
+    .select('reactions, channel_id')
+    .eq('id', messageId)
+    .single();
+    
+  if (fetchErr) {
+    console.error('[chat] Error fetching msg reactions:', fetchErr);
+    return;
+  }
+
+  const reactions = msgData.reactions || {};
+  const currentReactors = reactions[emoji] || [];
+  const hasReacted = currentReactors.includes(userId);
+  
+  let newReactors;
+  if (hasReacted) {
+    newReactors = currentReactors.filter(id => id !== userId);
+  } else {
+    newReactors = [...currentReactors, userId];
+  }
+  
+  const newReactions = { ...reactions };
+  if (newReactors.length === 0) {
+    delete newReactions[emoji];
+  } else {
+    newReactions[emoji] = newReactors;
+  }
+  
+  const { error: updateErr } = await supabase
+    .from(MESSAGES_TABLE)
+    .update({ reactions: newReactions })
+    .eq('id', messageId);
+    
+  if (updateErr) {
+    console.error('[chat] Error updating reaction:', updateErr);
+    return;
+  }
+  
+  if (!hasReacted && messageSenderId && messageSenderId !== userId) {
+    const { data: userData } = await supabase.from(PROFILES_TABLE).select('name').eq('id', userId).single();
+    const senderName = userData?.name || 'Someone';
+    const truncContent = messageContent ? (messageContent.length > 30 ? messageContent.substring(0, 30) + '...' : messageContent) : 'a message';
+    
+    try {
+      await supabase.from('notifications').insert([{
+        recipient_id: messageSenderId,
+        sender_id: userId,
+        title: 'New Reaction',
+        message: `${senderName} reacted ${emoji} to: "${truncContent}"`,
+        type: 'chat_reaction',
+        reference_id: msgData.channel_id || messageId,
+        is_read: false,
+      }]);
+    } catch (dbErr) {
+      console.warn('[chat] Failed to insert reaction notification:', dbErr);
+    }
+
+    let badgeCount = 0;
+    try {
+      badgeCount = await fetchUnreadNotificationCount(messageSenderId);
+    } catch (e) {
+      // ignore
+    }
+    
+    sendPushToUser({
+      recipientUserId: messageSenderId,
+      title: 'New Reaction',
+      body: `${senderName} reacted ${emoji} to: "${truncContent}"`,
+      badgeCount,
+      data: { type: 'chat_reaction', messageId, channelId: msgData.channel_id || '' },
+    }).catch(err => console.warn('[chat] Failed to send reaction push:', err));
+  }
+};
+
 export const fetchChannelMemberLastReadAt = async ({ channelId, userId }) => {
   if (!isSupabaseConfigured || !channelId || !userId) {
     return null;
@@ -763,18 +875,22 @@ const subscribeToTable = ({ channelPrefix, table, filter, onChange, events = REA
   };
 };
 
-export const subscribeToChannelMessages = (channelId, onInsert) =>
+export const subscribeToChannelMessages = (channelId, onInsert, onUpdate) =>
   subscribeToTable({
     channelPrefix: `chat-messages-${channelId}`,
     table: MESSAGES_TABLE,
     filter: `channel_id=eq.${channelId}`,
+    events: ['INSERT', 'UPDATE'],
     onChange: async payload => {
-      if (payload.eventType !== 'INSERT' || !payload.new) {
-        return;
+      if (!payload.new) return;
+      
+      if (payload.eventType === 'INSERT') {
+        const profileMap = await fetchProfilesByIds([payload.new.sender_id]);
+        onInsert(mapMessageRow(payload.new, profileMap));
+      } else if (payload.eventType === 'UPDATE' && onUpdate) {
+        const profileMap = await fetchProfilesByIds([payload.new.sender_id]);
+        onUpdate(mapMessageRow(payload.new, profileMap));
       }
-
-      const profileMap = await fetchProfilesByIds([payload.new.sender_id]);
-      onInsert(mapMessageRow(payload.new, profileMap));
     },
   });
 

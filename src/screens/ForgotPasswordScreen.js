@@ -201,7 +201,7 @@ const ForgotPasswordScreen = () => {
           required
           value={email}
           onChangeText={text => {
-            setEmail(text);
+            setEmail(text.toLowerCase());
             clearFieldError('email');
           }}
           placeholder={EMAIL_PLACEHOLDER}
