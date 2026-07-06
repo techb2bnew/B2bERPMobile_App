@@ -153,7 +153,7 @@ const LoginScreen = () => {
 
       <KeyboardAvoidingView
         style={BaseStyle.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"

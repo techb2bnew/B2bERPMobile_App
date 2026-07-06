@@ -71,7 +71,7 @@ import {
   subscribeToAssigneeProjectTasksChanges,
 } from '../../services/projectTasksService';
 import { subscribeToProjectsChanges } from '../../services/projectsService';
-import { buildEmployeeNameMap } from '../../utils/projectUtils';
+import { buildEmployeeNameMap, formatTaskDate, isTaskScheduledToday } from '../../utils/projectUtils';
 import { useWeeklyHours } from '../../hooks/useWeeklyHours';
 import { getLocalDateKey } from '../../services/clockSessionsService';
 import { normalizeDepartmentName } from '../../services/hrmsService';
@@ -199,6 +199,7 @@ const DashboardScreen = () => {
   const [shiftsLoading, setShiftsLoading] = useState(false);
   const [recentLeaves, setRecentLeaves] = useState([]);
   const [leavesLoading, setLeavesLoading] = useState(false);
+  const [totalEmployees, setTotalEmployees] = useState(0);
 
   const loadTodayTasks = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -218,15 +219,14 @@ const DashboardScreen = () => {
       if (isTeamLeader) {
         const employeeNameMap = buildEmployeeNameMap(employees);
         const projectIds = teamProjects.map(project => project.id);
-        setTodayTasks(
-          await fetchTeamLeaderTasks({
-            assigneeId: user?.id,
-            projectIds,
-            projectNameById,
-            employeeNameMap,
-            assigneeName: user?.name || '',
-          }),
-        );
+        const teamLeaderTasks = await fetchTeamLeaderTasks({
+          assigneeId: user?.id,
+          projectIds,
+          projectNameById,
+          employeeNameMap,
+          assigneeName: user?.name || '',
+        });
+        setTodayTasks(teamLeaderTasks.filter(isTaskScheduledToday));
       } else {
         setTodayTasks(
           await fetchTodayTasksForUser(
@@ -266,6 +266,18 @@ const DashboardScreen = () => {
 
         if (sessionErr) throw sessionErr;
 
+        const { data: rawProfiles } = await supabase
+          .from('employee_profiles')
+          .select('id, role, dept');
+
+        const nonCeoProfiles = (rawProfiles || []).filter(p => !isCeoAdminUser({ role: p.role }));
+        setTotalEmployees(nonCeoProfiles.length);
+
+        const profileMap = {};
+        nonCeoProfiles.forEach(p => {
+          profileMap[p.id] = p;
+        });
+
         if (rawSessions && rawSessions.length > 0) {
           const ids = rawSessions.map(s => s.id);
           const { data: rawSegments, error: segmentErr } = await supabase
@@ -276,23 +288,16 @@ const DashboardScreen = () => {
 
           if (segmentErr) throw segmentErr;
 
-          const { data: rawProfiles } = await supabase
-            .from('employee_profiles')
-            .select('id, role, dept');
-
-          const profileMap = {};
-          (rawProfiles || []).forEach(p => {
-            profileMap[p.id] = p;
-          });
-
-          const mapped = rawSessions.map(session => {
-            const profile = profileMap[session.employee_id] || {};
-            return {
-              ...session,
-              employee_dept: normalizeDepartmentName(profile.dept),
-              segments: (rawSegments || []).filter(seg => seg.session_id === session.id)
-            };
-          });
+          const mapped = rawSessions
+            .filter(session => profileMap[session.employee_id] !== undefined)
+            .map(session => {
+              const profile = profileMap[session.employee_id];
+              return {
+                ...session,
+                employee_dept: normalizeDepartmentName(profile.dept),
+                segments: (rawSegments || []).filter(seg => seg.session_id === session.id)
+              };
+            });
           setShiftSessions(mapped);
         } else {
           setShiftSessions([]);
@@ -322,6 +327,7 @@ const DashboardScreen = () => {
             segments: [{ kind: 'working', started_at: Date.now() - 3.1 * 3600 * 1000, ended_at: null }]
           }
         ]);
+        setTotalEmployees(10);
       }
     } catch (e) {
       console.error('Error loading dashboard shifts:', e);
@@ -401,11 +407,19 @@ const DashboardScreen = () => {
   const ceoStats = useMemo(() => {
     let working = 0;
     let onBreak = 0;
+    let idle = 0;
     let totalWorkMs = 0;
+    const uniquePresent = new Set();
 
     shiftSessions.forEach(session => {
+      uniquePresent.add(session.employee_id);
       if (session.status === 'active') {
-        working += 1;
+        const lastSeg = session.segments && session.segments[session.segments.length - 1];
+        if (lastSeg && !lastSeg.ended_at && lastSeg.kind === 'idle') {
+          idle += 1;
+        } else {
+          working += 1;
+        }
       } else if (session.status === 'paused') {
         onBreak += 1;
       }
@@ -422,7 +436,8 @@ const DashboardScreen = () => {
     return {
       working,
       onBreak,
-      total: shiftSessions.length,
+      idle,
+      present: uniquePresent.size,
       workTimeStr: formatDuration(totalWorkMs),
     };
   }, [shiftSessions]);
@@ -500,8 +515,11 @@ const DashboardScreen = () => {
     if (task.createdDate) {
       parts.push(`${DASHBOARD_TASK_CREATED_LABEL} ${task.createdDate}`);
     }
+    if (task.taskDate) {
+      parts.push(`Task ${formatTaskDate(task.taskDate)}`);
+    }
     if (task.dueDate) {
-      parts.push(`${DASHBOARD_TASK_DUE_LABEL} ${task.dueDate}`);
+      parts.push(`${DASHBOARD_TASK_DUE_LABEL} ${formatTaskDate(task.dueDate)}`);
     }
     if (task.estimateLabel) {
       parts.push(`${DASHBOARD_TASK_EST_LABEL} ${task.estimateLabel}`);
@@ -526,17 +544,17 @@ const DashboardScreen = () => {
           {isCeoAdminUser(user) && (
             /* CEO Summary Grid */
             <View style={styles.ceoOverviewGrid}>
-              <View style={styles.ceoStatCard}>
+              <TouchableOpacity style={styles.ceoStatCard} onPress={() => navigation.navigate(MAIN_ROUTES.SHIFT_TRACKER, { filter: 'active' })}>
                 <View style={styles.ceoStatHeader}>
                   <Icon name="users" size={wp(4.2)} color="#3DDC84" />
                   <Text style={styles.ceoStatLabel}>Active Staff</Text>
                 </View>
                 <Text style={styles.ceoStatValue}>
-                  {shiftsLoading ? '--' : `${ceoStats.working} / ${ceoStats.total}`}
+                  {shiftsLoading ? '--' : `${ceoStats.working} / ${ceoStats.present}`}
                 </Text>
-              </View>
+              </TouchableOpacity>
 
-              <View style={styles.ceoStatCard}>
+              <TouchableOpacity style={styles.ceoStatCard} onPress={() => navigation.navigate(MAIN_ROUTES.SHIFT_TRACKER, { filter: 'paused' })}>
                 <View style={styles.ceoStatHeader}>
                   <Icon name="coffee" size={wp(4.2)} color="#F5C542" />
                   <Text style={styles.ceoStatLabel}>On Break</Text>
@@ -544,9 +562,9 @@ const DashboardScreen = () => {
                 <Text style={styles.ceoStatValue}>
                   {shiftsLoading ? '--' : `${ceoStats.onBreak}`}
                 </Text>
-              </View>
+              </TouchableOpacity>
 
-              <View style={styles.ceoStatCard}>
+              <TouchableOpacity style={styles.ceoStatCard} onPress={() => navigation.navigate(MAIN_ROUTES.SHIFT_TRACKER, { filter: 'all' })}>
                 <View style={styles.ceoStatHeader}>
                   <Icon name="zap" size={wp(4.2)} color="#3498DB" />
                   <Text style={styles.ceoStatLabel}>Team Work Hours</Text>
@@ -554,9 +572,9 @@ const DashboardScreen = () => {
                 <Text style={styles.ceoStatValue}>
                   {shiftsLoading ? '--' : ceoStats.workTimeStr}
                 </Text>
-              </View>
+              </TouchableOpacity>
 
-              <View style={styles.ceoStatCard}>
+              <TouchableOpacity style={styles.ceoStatCard} onPress={() => navigation.navigate(MAIN_ROUTES.APPLY_LEAVE)}>
                 <View style={styles.ceoStatHeader}>
                   <Icon name="calendar" size={wp(4.2)} color={PURPLE} />
                   <Text style={styles.ceoStatLabel}>Pending Leaves</Text>
@@ -564,7 +582,27 @@ const DashboardScreen = () => {
                 <Text style={styles.ceoStatValue}>
                   {leavesLoading ? '--' : `${recentLeaves.length}`}
                 </Text>
-              </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.ceoStatCard} onPress={() => navigation.navigate(MAIN_ROUTES.SHIFT_TRACKER, { filter: 'idle' })}>
+                <View style={styles.ceoStatHeader}>
+                  <Icon name="clock" size={wp(4.2)} color="#F85149" />
+                  <Text style={styles.ceoStatLabel}>Idle</Text>
+                </View>
+                <Text style={styles.ceoStatValue}>
+                  {shiftsLoading ? '--' : `${ceoStats.idle}`}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.ceoStatCard} onPress={() => navigation.navigate(MAIN_ROUTES.SHIFT_TRACKER, { filter: 'absent' })}>
+                <View style={styles.ceoStatHeader}>
+                  <Icon name="user-x" size={wp(4.2)} color="#E85D5D" />
+                  <Text style={styles.ceoStatLabel}>Absent Today</Text>
+                </View>
+                <Text style={styles.ceoStatValue}>
+                  {shiftsLoading ? '--' : `${Math.max(0, totalEmployees - ceoStats.present)} / ${totalEmployees}`}
+                </Text>
+              </TouchableOpacity>
             </View>
           )}
 

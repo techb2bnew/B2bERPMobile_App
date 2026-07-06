@@ -9,6 +9,8 @@ import {
   TouchableOpacity,
   View,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -213,7 +215,7 @@ const AtsPipelineScreen = () => {
 
       {/* Add Candidate Modal */}
       <Modal visible={modalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Add Candidate</Text>
             
@@ -245,7 +247,7 @@ const AtsPipelineScreen = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
 
         {clockPickerTarget === 'add' && (
           <AnalogClockPickerModal
@@ -261,7 +263,7 @@ const AtsPipelineScreen = () => {
 
       {/* Update Status Modal */}
       <Modal visible={statusModalVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Update Status</Text>
             <Text style={{color: darkTextSecondaryColor, marginBottom: hp(2)}}>Candidate: {selectedCandidate?.candidate_name}</Text>
@@ -301,7 +303,7 @@ const AtsPipelineScreen = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
 
         {clockPickerTarget === 'update' && (
           <AnalogClockPickerModal

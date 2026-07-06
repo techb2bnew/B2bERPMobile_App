@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRoute } from '@react-navigation/native';
 import {
   ActivityIndicator,
   FlatList,
@@ -10,6 +11,7 @@ import {
   TouchableOpacity,
   UIManager,
   View,
+  TextInput
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -26,9 +28,11 @@ import { style } from '../../constants/Fonts';
 import { createRealtimeChannelName, getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 import { fetchTasksForAssignee } from '../../services/projectTasksService';
+import { formatTaskDate, normalizeTaskDateKey } from '../../utils/projectUtils';
 import { Calendar } from 'react-native-calendars';
 import { getLocalDateKey } from '../../services/clockSessionsService';
 import { normalizeDepartmentName } from '../../services/hrmsService';
+import { isCeoAdminUser } from '../../constants/roles';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -200,6 +204,78 @@ const getPriorityColor = (priority) => {
   return '#8B949E';
 };
 
+const buildTaskDatesLine = task => {
+  const taskDate = normalizeTaskDateKey(task?.task_date ?? task?.taskDate);
+  const dueDate = normalizeTaskDateKey(task?.due ?? task?.dueDate);
+  const parts = [];
+
+  if (taskDate) {
+    parts.push(`Task: ${formatTaskDate(taskDate)}`);
+  }
+  if (dueDate) {
+    parts.push(`Due: ${formatTaskDate(dueDate)}`);
+  }
+
+  return parts.join('   ·   ');
+};
+
+const isTaskInProgressStatus = status => {
+  const normalized = String(status || '').toLowerCase();
+  return normalized === 'in-progress' || normalized === 'doing';
+};
+
+const isWorkingDayDate = date => {
+  const day = date.getDay();
+  return day !== 0 && day !== 6;
+};
+
+const getRecentWorkingDayKeys = (count = 5, fromDate = new Date()) => {
+  const keys = [];
+  const cursor = new Date(fromDate);
+
+  while (keys.length < count) {
+    if (isWorkingDayDate(cursor)) {
+      keys.push(getLocalDateKey(cursor));
+    }
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  return keys;
+};
+
+const getTaskRelevantDateKey = task =>
+  normalizeTaskDateKey(task?.task_date ?? task?.taskDate)
+  || normalizeTaskDateKey(String(task?.updated_at || '').slice(0, 10))
+  || normalizeTaskDateKey(String(task?.created_at || '').slice(0, 10));
+
+const isTaskInRecentWorkingDays = (task, workingDayKeys) => {
+  const dateKey = getTaskRelevantDateKey(task);
+  if (!dateKey) {
+    return false;
+  }
+  return workingDayKeys.includes(dateKey);
+};
+
+const splitEmployeeTasksForTracker = (tasks, workingDayKeys) => {
+  const inProgressTasks = [];
+  const recentOtherTasks = [];
+
+  (tasks || []).forEach(task => {
+    if (isTaskInProgressStatus(task.status)) {
+      inProgressTasks.push(task);
+      return;
+    }
+
+    if (isTaskInRecentWorkingDays(task, workingDayKeys)) {
+      recentOtherTasks.push(task);
+    }
+  });
+
+  recentOtherTasks.sort((a, b) => getTaskRelevantDateKey(b).localeCompare(getTaskRelevantDateKey(a)));
+
+  return { inProgressTasks, recentOtherTasks };
+};
+
 const adjustTimestampToDate = (timestamp, targetDate) => {
   if (!timestamp) return null;
   const d = new Date(timestamp);
@@ -297,7 +373,20 @@ const getMockTasksForDate = (date) => {
   }
 };
 
+const TRACKER_STATUS_FILTERS = [
+  { id: 'all', label: 'All', icon: 'users', color: '#9B59B6' },
+  { id: 'active', label: 'Active', icon: 'zap', color: '#3DDC84' },
+  { id: 'paused', label: 'On Break', icon: 'coffee', color: '#F5C542' },
+  { id: 'idle', label: 'Idle', icon: 'clock', color: '#F85149' },
+  { id: 'absent', label: 'Absent', icon: 'user-x', color: '#E85D5D' },
+];
+
+const getTrackerFilterLabel = filterId =>
+  TRACKER_STATUS_FILTERS.find(filter => filter.id === filterId)?.label || 'All';
+
 const ShiftTrackerScreen = () => {
+  const route = useRoute();
+  const initialFilter = route.params?.filter || 'all';
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
@@ -305,14 +394,23 @@ const ShiftTrackerScreen = () => {
   const [employeeTasks, setEmployeeTasks] = useState([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [trackingMode, setTrackingMode] = useState('SHIFT');
+  const [trackerFilter, setTrackerFilter] = useState(initialFilter);
+
+  useEffect(() => {
+    setTrackerFilter(route.params?.filter || 'all');
+  }, [route.params?.filter]);
   const [allTasksByEmployee, setAllTasksByEmployee] = useState({});
   const [selectedTaskDetail, setSelectedTaskDetail] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [tick, setTick] = useState(0);
   const [expandedSessionId, setExpandedSessionId] = useState(null);
+  const [expandedTaskEmployees, setExpandedTaskEmployees] = useState({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [rawTasks, setRawTasks] = useState([]);
   const [rawHistory, setRawHistory] = useState([]);
 
@@ -329,10 +427,178 @@ const ShiftTrackerScreen = () => {
     return emp ? emp.name : '';
   }, [employees, selectedEmployeeId]);
 
+  const departments = useMemo(() => {
+    const depts = new Set();
+    employees.forEach(emp => {
+      depts.add(normalizeDepartmentName(emp.dept));
+    });
+    return Array.from(depts).sort();
+  }, [employees]);
+
+  const scopedSessions = useMemo(() => {
+    let result = sessions;
+
+    if (selectedDepartment) {
+      result = result.filter(s => s.employee_dept === selectedDepartment);
+    }
+    if (selectedEmployeeId) {
+      result = result.filter(s => s.employee_id === selectedEmployeeId);
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(s =>
+        s.employee_name?.toLowerCase().includes(q) ||
+        s.employee_dept?.toLowerCase().includes(q)
+      );
+    }
+
+    return result;
+  }, [sessions, selectedDepartment, selectedEmployeeId, searchQuery]);
+
   const filteredSessions = useMemo(() => {
-    if (!selectedEmployeeId) return sessions;
-    return sessions.filter(s => s.employee_id === selectedEmployeeId);
-  }, [sessions, selectedEmployeeId]);
+    let result = scopedSessions;
+
+    if (trackerFilter === 'active') {
+      result = result.filter(s => s.status === 'active' && !(s.segments && s.segments[s.segments.length - 1]?.kind === 'idle' && !s.segments[s.segments.length - 1]?.ended_at));
+    } else if (trackerFilter === 'paused') {
+      result = result.filter(s => s.status === 'paused');
+    } else if (trackerFilter === 'idle') {
+      result = result.filter(s => s.status === 'active' && s.segments && s.segments[s.segments.length - 1]?.kind === 'idle' && !s.segments[s.segments.length - 1]?.ended_at);
+    } else if (trackerFilter === 'absent') {
+      result = result.filter(s => s.status === 'offline');
+    }
+
+    return result;
+  }, [scopedSessions, trackerFilter]);
+
+  useEffect(() => {
+    setExpandedTaskEmployees({});
+  }, [selectedDate]);
+
+  const recentWorkingDayKeys = useMemo(
+    () => getRecentWorkingDayKeys(5, selectedDate),
+    [selectedDate],
+  );
+
+  const toggleTaskExpand = useCallback((employeeId) => {
+    setExpandedTaskEmployees(prev => ({
+      ...prev,
+      [employeeId]: !prev[employeeId],
+    }));
+  }, []);
+
+  const renderTaskModeItem = useCallback((task) => {
+    const totalSecs = task.totalSecs || 0;
+    const isActiveTask = isTaskInProgressStatus(task.status);
+
+    let statusLabel = task.status || 'To Do';
+    let statusColor = '#8B949E';
+    let statusBg = 'rgba(255, 255, 255, 0.05)';
+
+    if (isActiveTask) {
+      statusLabel = 'In Progress';
+      statusColor = '#3498DB';
+      statusBg = 'rgba(52, 152, 219, 0.15)';
+    } else if (task.status === 'ready-for-testing' || task.status === 'testing' || task.status === 'qa') {
+      statusLabel = 'QA';
+      statusColor = '#9B59B6';
+      statusBg = 'rgba(155, 89, 182, 0.15)';
+    } else if (task.status === 'done') {
+      statusLabel = 'Done';
+      statusColor = '#3DDC84';
+      statusBg = 'rgba(61, 220, 132, 0.15)';
+    }
+
+    const todoStr = formatSecsToMinHr(task.todoSecs);
+    const progressStr = formatSecsToMinHr(task.progressSecs);
+    const testingStr = formatSecsToMinHr(task.testingSecs);
+    const doneStr = formatSecsToMinHr(task.doneSecs);
+
+    const labelParts = [];
+    if (task.todoSecs > 0) labelParts.push(`To Do: ${todoStr}`);
+    if (task.progressSecs > 0) labelParts.push(`In Progress: ${progressStr}`);
+    if (task.testingSecs > 0) labelParts.push(`QA: ${testingStr}`);
+    if (task.doneSecs > 0) labelParts.push(`Done: ${doneStr}`);
+    const detailsStr = labelParts.join(' • ') || 'To Do: 0m';
+
+    const todoWidth = totalSecs > 0 ? (task.todoSecs / totalSecs) * 100 : 0;
+    const progressWidth = totalSecs > 0 ? (task.progressSecs / totalSecs) * 100 : 0;
+    const testingWidth = totalSecs > 0 ? (task.testingSecs / totalSecs) * 100 : 0;
+    const doneWidth = totalSecs > 0 ? (task.doneSecs / totalSecs) * 100 : 0;
+    const hasSpentTime = totalSecs > 0;
+    const taskDatesLine = buildTaskDatesLine(task);
+
+    return (
+      <TouchableOpacity
+        key={task.id}
+        style={[
+          styles.taskModeItemRow,
+          isActiveTask && styles.activeTaskModeItemRow,
+        ]}
+        onPress={() => setSelectedTaskDetail(task)}
+        activeOpacity={0.85}>
+        <View style={styles.taskModeItemContent}>
+          <View style={styles.taskModeItemTitleRow}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: wp(1.2) }}>
+              {isActiveTask && (
+                <Icon name="play" size={wp(3)} color="#3498DB" />
+              )}
+              <Text style={styles.taskModeItemTitle} numberOfLines={1}>
+                {task.title}
+              </Text>
+            </View>
+            <Text style={styles.taskModeItemProject} numberOfLines={1}>
+              {task.project_name || task.project}
+            </Text>
+          </View>
+          {taskDatesLine ? (
+            <Text style={styles.taskDatesLine} numberOfLines={1}>
+              {taskDatesLine}
+            </Text>
+          ) : null}
+
+          <View style={styles.taskModeProgressBarWrapper}>
+            {!hasSpentTime ? (
+              <View style={[styles.taskModeBarSegment, { backgroundColor: '#30363D', width: '100%' }]} />
+            ) : (
+              <View style={styles.taskModeProgressBar}>
+                {todoWidth > 0 && (
+                  <View style={[styles.taskModeBarSegment, { backgroundColor: '#8B949E', width: `${todoWidth}%` }]}>
+                    {todoWidth > 20 && <Text style={styles.taskModeBarText} numberOfLines={1}>{todoStr}</Text>}
+                  </View>
+                )}
+                {progressWidth > 0 && (
+                  <View style={[styles.taskModeBarSegment, { backgroundColor: '#3498DB', width: `${progressWidth}%` }]}>
+                    {progressWidth > 20 && <Text style={styles.taskModeBarText} numberOfLines={1}>{progressStr}</Text>}
+                  </View>
+                )}
+                {testingWidth > 0 && (
+                  <View style={[styles.taskModeBarSegment, { backgroundColor: '#9B59B6', width: `${testingWidth}%` }]}>
+                    {testingWidth > 20 && <Text style={styles.taskModeBarText} numberOfLines={1}>{testingStr}</Text>}
+                  </View>
+                )}
+                {doneWidth > 0 && (
+                  <View style={[styles.taskModeBarSegment, { backgroundColor: '#3DDC84', width: `${doneWidth}%` }]}>
+                    {doneWidth > 20 && <Text style={styles.taskModeBarText} numberOfLines={1}>{doneStr}</Text>}
+                  </View>
+                )}
+              </View>
+            )}
+          </View>
+
+          <Text style={styles.taskModeItemDetails} numberOfLines={1}>
+            {detailsStr}
+          </Text>
+        </View>
+
+        <View style={[styles.taskModeStatusBadge, { backgroundColor: statusBg }]}>
+          <Text style={[styles.taskModeStatusText, { color: statusColor }]}>
+            {statusLabel}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }, []);
 
   const referenceTime = useMemo(() => {
     const todayKey = getLocalDateKey(new Date());
@@ -447,6 +713,11 @@ const ShiftTrackerScreen = () => {
     const tasks = allTasksByEmployee[activeSession.employee_id] || [];
     return tasks.find(t => t.status === 'in-progress' || t.status === 'doing') || null;
   }, [activeSession, allTasksByEmployee]);
+
+  const selectedTaskDatesLine = useMemo(
+    () => (selectedTaskDetail ? buildTaskDatesLine(selectedTaskDetail) : ''),
+    [selectedTaskDetail],
+  );
 
   const logItems = useMemo(() => {
     if (!activeSession) return [];
@@ -862,25 +1133,51 @@ const ShiftTrackerScreen = () => {
             .from('employee_profiles')
             .select('id, role, dept, name');
 
+          const nonCeoProfiles = (rawProfiles || []).filter(p => !isCeoAdminUser({ role: p.role }));
+
           const profileMap = {};
           const employeeNameMap = {};
-          (rawProfiles || []).forEach(p => {
+          nonCeoProfiles.forEach(p => {
             profileMap[p.id] = p;
             employeeNameMap[p.id] = p.name;
           });
 
           // 3. Map segments & profiles to their corresponding sessions
-          const mapped = rawSessions.map(session => {
-            const profile = profileMap[session.employee_id] || {};
-            return {
-              ...session,
-              employee_role: profile.role || 'Employee',
-              employee_dept: normalizeDepartmentName(profile.dept),
-              segments: (rawSegments || []).filter(seg => seg.session_id === session.id)
-            };
+          const presentEmpIds = new Set();
+          const mapped = [];
+          rawSessions.forEach(session => {
+            const profile = profileMap[session.employee_id];
+            if (profile) {
+              presentEmpIds.add(session.employee_id);
+              mapped.push({
+                ...session,
+                employee_name: profile.name || session.employee_name,
+                employee_role: profile.role || 'Employee',
+                employee_dept: normalizeDepartmentName(profile.dept),
+                segments: (rawSegments || []).filter(seg => seg.session_id === session.id)
+              });
+            }
           });
-          setSessions(mapped);
-          setEmployees(rawProfiles || []);
+
+          const offlineSessions = [];
+          nonCeoProfiles.forEach(p => {
+            if (!presentEmpIds.has(p.id)) {
+              offlineSessions.push({
+                id: `offline-${p.id}`,
+                employee_id: p.id,
+                employee_name: p.name,
+                employee_role: p.role || 'Employee',
+                employee_dept: normalizeDepartmentName(p.dept),
+                status: 'offline',
+                clock_in: null,
+                clock_out: null,
+                segments: [],
+              });
+            }
+          });
+
+          setSessions([...mapped, ...offlineSessions]);
+          setEmployees(nonCeoProfiles);
 
           // 4. Fetch all projects to map names
           const { data: projects } = await getSupabase()
@@ -919,6 +1216,7 @@ const ShiftTrackerScreen = () => {
             const startOfDayMs = new Date(`${dateKey}T00:00:00`).getTime();
             const endOfDayMs = new Date(`${dateKey}T23:59:59.999`).getTime();
             const isTodaySelectedVal = dateKey === getLocalDateKey(new Date());
+            const refTime = isTodaySelectedVal ? Date.now() : endOfDayMs;
 
             // Map time spent in each state for each task
             const tasksWithTime = rawTasks.map(task => {
@@ -930,10 +1228,10 @@ const ShiftTrackerScreen = () => {
 
               hist.forEach(h => {
                 const enteredTime = new Date(h.entered_at).getTime();
-                const exitedTime = h.exited_at ? new Date(h.exited_at).getTime() : referenceTime;
+                const exitedTime = h.exited_at ? new Date(h.exited_at).getTime() : refTime;
 
                 const overlapStart = Math.max(enteredTime, startOfDayMs);
-                const overlapEnd = Math.min(exitedTime, referenceTime);
+                const overlapEnd = Math.min(exitedTime, refTime);
                 const secs = overlapStart < overlapEnd ? Math.max(0, Math.floor((overlapEnd - overlapStart) / 1000)) : 0;
 
                 const status = (h.to_status || '').toLowerCase();
@@ -955,7 +1253,7 @@ const ShiftTrackerScreen = () => {
                 const enteredTime = new Date(task.updated_at || task.created_at).getTime();
 
                 const overlapStart = Math.max(enteredTime, startOfDayMs);
-                const overlapEnd = Math.min(referenceTime, endOfDayMs);
+                const overlapEnd = Math.min(refTime, endOfDayMs);
                 const elapsed = overlapStart < overlapEnd ? Math.max(0, Math.floor((overlapEnd - overlapStart) / 1000)) : 0;
 
                 if (currentStatus === 'to-do' || currentStatus === 'todo') {
@@ -1036,7 +1334,25 @@ const ShiftTrackerScreen = () => {
             segments: segmentsAdjusted,
           };
         });
-        setSessions(adjustedSessions);
+
+        const presentEmpIds = new Set(adjustedSessions.map(s => s.employee_id));
+        const offlineSessions = [];
+        MOCK_EMPLOYEES.forEach(emp => {
+          if (!presentEmpIds.has(emp.id)) {
+            offlineSessions.push({
+              id: `offline-${emp.id}`,
+              employee_id: emp.id,
+              employee_name: emp.name,
+              employee_dept: emp.dept,
+              status: 'offline',
+              clock_in: null,
+              clock_out: null,
+              segments: [],
+            });
+          }
+        });
+
+        setSessions([...adjustedSessions, ...offlineSessions]);
         setEmployees(MOCK_EMPLOYEES);
         const dateKey = getLocalDateKey(selectedDate);
         const todayKey = getLocalDateKey(new Date());
@@ -1112,7 +1428,7 @@ const ShiftTrackerScreen = () => {
         setLoading(false);
       }
     }
-  }, [selectedDate, referenceTime]);
+  }, [selectedDate]);
 
   useEffect(() => {
     loadTrackerData();
@@ -1161,7 +1477,7 @@ const ShiftTrackerScreen = () => {
     let onBreak = 0;
     let idle = 0;
 
-    sessions.forEach(session => {
+    scopedSessions.forEach(session => {
       if (session.status === 'active') {
         const lastSeg = session.segments && session.segments[session.segments.length - 1];
         if (lastSeg && !lastSeg.ended_at && lastSeg.kind === 'idle') {
@@ -1174,8 +1490,8 @@ const ShiftTrackerScreen = () => {
       }
     });
 
-    return { active, onBreak, idle, total: sessions.length };
-  }, [sessions]);
+    return { active, onBreak, idle, total: scopedSessions.length };
+  }, [scopedSessions]);
 
   const renderTimelineBar = (segments) => {
     if (!segments || segments.length === 0) {
@@ -1280,6 +1596,10 @@ const ShiftTrackerScreen = () => {
     });
 
     if (trackingMode === 'TASK') {
+      const { inProgressTasks, recentOtherTasks } = splitEmployeeTasksForTracker(tasks, recentWorkingDayKeys);
+      const isTaskExpanded = !!expandedTaskEmployees[session.employee_id];
+      const visibleTaskCount = inProgressTasks.length + (isTaskExpanded ? recentOtherTasks.length : 0);
+
       return (
         <View style={styles.employeeCard}>
           <TouchableOpacity
@@ -1308,128 +1628,37 @@ const ShiftTrackerScreen = () => {
               </View>
             </View>
 
-            {/* Right Column: Task list & timeline bars */}
+            {/* Right Column: Task list */}
             <View style={styles.taskModeTasksCol}>
-              {tasks.length === 0 ? (
+              {visibleTaskCount === 0 ? (
                 <View style={styles.taskModeEmptyTasks}>
-                  <Text style={styles.taskModeEmptyText}>No tasks assigned today.</Text>
+                  <Text style={styles.taskModeEmptyText}>No active tasks in last 5 working days.</Text>
                 </View>
               ) : (
                 <View style={styles.taskModeTasksList}>
-                  {tasks.map(task => {
-                    const totalSecs = task.totalSecs || 0;
-                    const isActiveTask = task.status === 'in-progress' || task.status === 'doing';
+                  {inProgressTasks.map(renderTaskModeItem)}
 
-                    // Task status label and colors
-                    let statusLabel = task.status || 'To Do';
-                    let statusColor = '#8B949E';
-                    let statusBg = 'rgba(255, 255, 255, 0.05)';
-
-                    if (isActiveTask) {
-                      statusLabel = 'In Progress';
-                      statusColor = '#3498DB';
-                      statusBg = 'rgba(52, 152, 219, 0.15)';
-                    } else if (task.status === 'ready-for-testing' || task.status === 'testing' || task.status === 'qa') {
-                      statusLabel = 'QA';
-                      statusColor = '#9B59B6';
-                      statusBg = 'rgba(155, 89, 182, 0.15)';
-                    } else if (task.status === 'done') {
-                      statusLabel = 'Done';
-                      statusColor = '#3DDC84';
-                      statusBg = 'rgba(61, 220, 132, 0.15)';
-                    }
-
-                    const todoStr = formatSecsToMinHr(task.todoSecs);
-                    const progressStr = formatSecsToMinHr(task.progressSecs);
-                    const testingStr = formatSecsToMinHr(task.testingSecs);
-                    const doneStr = formatSecsToMinHr(task.doneSecs);
-
-                    // Breakdown label list
-                    const labelParts = [];
-                    if (task.todoSecs > 0) labelParts.push(`To Do: ${todoStr}`);
-                    if (task.progressSecs > 0) labelParts.push(`In Progress: ${progressStr}`);
-                    if (task.testingSecs > 0) labelParts.push(`QA: ${testingStr}`);
-                    if (task.doneSecs > 0) labelParts.push(`Done: ${doneStr}`);
-                    const detailsStr = labelParts.join(' • ') || 'To Do: 0m';
-
-                    // Stacked bar segment flex sizes
-                    const todoWidth = totalSecs > 0 ? (task.todoSecs / totalSecs) * 100 : 0;
-                    const progressWidth = totalSecs > 0 ? (task.progressSecs / totalSecs) * 100 : 0;
-                    const testingWidth = totalSecs > 0 ? (task.testingSecs / totalSecs) * 100 : 0;
-                    const doneWidth = totalSecs > 0 ? (task.doneSecs / totalSecs) * 100 : 0;
-
-                    const hasSpentTime = totalSecs > 0;
-
-                    return (
+                  {recentOtherTasks.length > 0 && (
+                    <>
                       <TouchableOpacity
-                        key={task.id}
-                        style={[
-                          styles.taskModeItemRow,
-                          isActiveTask && styles.activeTaskModeItemRow
-                        ]}
-                        onPress={() => setSelectedTaskDetail(task)}
+                        style={styles.taskExpandBtn}
+                        onPress={() => toggleTaskExpand(session.employee_id)}
                         activeOpacity={0.85}>
-                        <View style={styles.taskModeItemContent}>
-                          {/* Task Title & Project */}
-                          <View style={styles.taskModeItemTitleRow}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: wp(1.2) }}>
-                              {isActiveTask && (
-                                <Icon name="play" size={wp(3)} color="#3498DB" />
-                              )}
-                              <Text style={styles.taskModeItemTitle} numberOfLines={1}>
-                                {task.title}
-                              </Text>
-                            </View>
-                            <Text style={styles.taskModeItemProject} numberOfLines={1}>
-                              {task.project_name || task.project}
-                            </Text>
-                          </View>
-
-                          {/* Stacked Progress Bar */}
-                          <View style={styles.taskModeProgressBarWrapper}>
-                            {!hasSpentTime ? (
-                              <View style={[styles.taskModeBarSegment, { backgroundColor: '#30363D', width: '100%' }]} />
-                            ) : (
-                              <View style={styles.taskModeProgressBar}>
-                                {todoWidth > 0 && (
-                                  <View style={[styles.taskModeBarSegment, { backgroundColor: '#8B949E', width: `${todoWidth}%` }]}>
-                                    {todoWidth > 20 && <Text style={styles.taskModeBarText} numberOfLines={1}>{todoStr}</Text>}
-                                  </View>
-                                )}
-                                {progressWidth > 0 && (
-                                  <View style={[styles.taskModeBarSegment, { backgroundColor: '#3498DB', width: `${progressWidth}%` }]}>
-                                    {progressWidth > 20 && <Text style={styles.taskModeBarText} numberOfLines={1}>{progressStr}</Text>}
-                                  </View>
-                                )}
-                                {testingWidth > 0 && (
-                                  <View style={[styles.taskModeBarSegment, { backgroundColor: '#9B59B6', width: `${testingWidth}%` }]}>
-                                    {testingWidth > 20 && <Text style={styles.taskModeBarText} numberOfLines={1}>{testingStr}</Text>}
-                                  </View>
-                                )}
-                                {doneWidth > 0 && (
-                                  <View style={[styles.taskModeBarSegment, { backgroundColor: '#3DDC84', width: `${doneWidth}%` }]}>
-                                    {doneWidth > 20 && <Text style={styles.taskModeBarText} numberOfLines={1}>{doneStr}</Text>}
-                                  </View>
-                                )}
-                              </View>
-                            )}
-                          </View>
-
-                          {/* Breakdown label text */}
-                          <Text style={styles.taskModeItemDetails} numberOfLines={1}>
-                            {detailsStr}
-                          </Text>
-                        </View>
-
-                        {/* Task Status Badge */}
-                        <View style={[styles.taskModeStatusBadge, { backgroundColor: statusBg }]}>
-                          <Text style={[styles.taskModeStatusText, { color: statusColor }]}>
-                            {statusLabel}
-                          </Text>
-                        </View>
+                        <Icon
+                          name={isTaskExpanded ? 'chevron-up' : 'chevron-down'}
+                          size={wp(3.5)}
+                          color={PURPLE}
+                        />
+                        <Text style={styles.taskExpandBtnText}>
+                          {isTaskExpanded
+                            ? 'Hide recent tasks'
+                            : `${recentOtherTasks.length} more task${recentOtherTasks.length === 1 ? '' : 's'} (last 5 days)`}
+                        </Text>
                       </TouchableOpacity>
-                    );
-                  })}
+
+                      {isTaskExpanded && recentOtherTasks.map(renderTaskModeItem)}
+                    </>
+                  )}
                 </View>
               )}
             </View>
@@ -1522,6 +1751,85 @@ const ShiftTrackerScreen = () => {
     return todayKey === selectedKey;
   }, [selectedDate]);
 
+  const clearAllFilters = () => {
+    setTrackerFilter('all');
+    setSelectedDepartment(null);
+    setSelectedEmployeeId(null);
+    setSearchQuery('');
+    setSelectedDate(new Date());
+  };
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (trackerFilter !== 'all') count += 1;
+    if (selectedDepartment) count += 1;
+    if (selectedEmployeeId) count += 1;
+    if (searchQuery) count += 1;
+    if (!isTodaySelected) count += 1;
+    return count;
+  }, [trackerFilter, selectedDepartment, selectedEmployeeId, searchQuery, isTodaySelected]);
+
+  const filterSummaryText = useMemo(() => {
+    const tags = [];
+    if (!isTodaySelected) tags.push(formatSelectedDateDisplay(selectedDate));
+    if (trackerFilter !== 'all') tags.push(getTrackerFilterLabel(trackerFilter));
+    if (selectedDepartment) tags.push(selectedDepartment);
+    if (selectedEmployeeId) tags.push(selectedEmployeeName ? selectedEmployeeName.split(' ')[0] : 'Staff');
+    if (searchQuery) tags.push(`"${searchQuery}"`);
+    return tags.length > 0 ? tags.join(' · ') : 'All staff · Today';
+  }, [isTodaySelected, selectedDate, trackerFilter, selectedDepartment, selectedEmployeeId, selectedEmployeeName, searchQuery]);
+
+  const filteredEmptyState = useMemo(() => {
+    if (selectedEmployeeId) {
+      return {
+        title: `No Shifts Tracked for ${selectedEmployeeName}`,
+        subtitle: 'This employee has not clocked in on this date.',
+      };
+    }
+
+    if (selectedDepartment) {
+      const filterLabel = getTrackerFilterLabel(trackerFilter).toLowerCase();
+      const dateLabel = isTodaySelected
+        ? 'today'
+        : `on ${formatSelectedDateDisplay(selectedDate)}`;
+
+      if (trackerFilter === 'all') {
+        return {
+          title: `No staff in ${selectedDepartment}`,
+          subtitle: isTodaySelected
+            ? 'No employee from this department has clocked in today.'
+            : 'No employee shifts found for this department on this date.',
+        };
+      }
+
+      return {
+        title: `No ${filterLabel} staff in ${selectedDepartment} ${dateLabel}`,
+        subtitle: 'Try another department or switch filter above.',
+      };
+    }
+
+    const filterLabel = getTrackerFilterLabel(trackerFilter).toLowerCase();
+    const dateLabel = isTodaySelected
+      ? 'today'
+      : `on ${formatSelectedDateDisplay(selectedDate)}`;
+
+    if (trackerFilter === 'all') {
+      return {
+        title: isTodaySelected
+          ? 'No Shifts Tracked Today'
+          : `No Shifts Tracked on ${formatSelectedDateDisplay(selectedDate)}`,
+        subtitle: isTodaySelected
+          ? 'No employee has clocked in yet today.'
+          : 'No employee shifts found for this date.',
+      };
+    }
+
+    return {
+      title: `No ${filterLabel} staff ${dateLabel}`,
+      subtitle: 'Switch filter above — tap All to see everyone.',
+    };
+  }, [isTodaySelected, selectedDate, selectedDepartment, selectedEmployeeId, selectedEmployeeName, trackerFilter]);
+
   const handlePrevDay = () => {
     const newDate = new Date(selectedDate);
     newDate.setDate(newDate.getDate() - 1);
@@ -1543,80 +1851,37 @@ const ShiftTrackerScreen = () => {
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <AppHeader title="Shift Tracker" />
 
-        {/* Combined Filters Row with Fixed Date Chip */}
-        <View style={styles.filtersContainer}>
-          {/* Fixed Date Picker Chip */}
+        <View style={styles.filterBarRow}>
+          <View style={styles.searchContainerMain}>
+            <Icon name="search" size={wp(4.2)} color={darkTextSecondaryColor} style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search staff or department..."
+              placeholderTextColor={darkTextSecondaryColor}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Icon name="x-circle" size={wp(4.3)} color={darkTextSecondaryColor} />
+              </TouchableOpacity>
+            )}
+          </View>
+
           <TouchableOpacity
-            style={styles.scrollDateChip}
-            onPress={() => setShowDatePicker(true)}
+            style={[styles.filterOpenBtn, activeFilterCount > 0 && styles.filterOpenBtnActive]}
+            onPress={() => setShowFilterModal(true)}
             activeOpacity={0.85}>
-            <Icon name="calendar" size={wp(3.5)} color="#ffffff" />
-            <Text style={styles.scrollDateChipText}>
-              {formatSelectedDateDisplay(selectedDate)}
+            <Icon name="sliders" size={wp(4)} color={activeFilterCount > 0 ? '#ffffff' : PURPLE} />
+            <Text style={[styles.filterOpenBtnText, activeFilterCount > 0 && styles.filterOpenBtnTextActive]}>
+              Filter
             </Text>
-            <Icon name="chevron-down" size={wp(3)} color="rgba(255,255,255,0.7)" />
-          </TouchableOpacity>
-
-          {/* Fixed Vertical Divider */}
-          <View style={styles.scrollChipDivider} />
-
-          {/* Scrollable Employee Selector Chips */}
-          <ScrollView
-            horizontal
-            style={{ flex: 1 }}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.employeeSelectorScroll}>
-
-            {/* "All Staff" Chip */}
-            <TouchableOpacity
-              style={[
-                styles.employeeChip,
-                !selectedEmployeeId && styles.activeEmployeeChip
-              ]}
-              onPress={() => setSelectedEmployeeId(null)}
-              activeOpacity={0.85}>
-              <View style={[
-                styles.allStaffIconBg,
-                !selectedEmployeeId && styles.activeAllStaffIconBg
-              ]}>
-                <Icon name="users" size={wp(3.5)} color={!selectedEmployeeId ? '#ffffff' : darkTextSecondaryColor} />
+            {activeFilterCount > 0 && (
+              <View style={styles.filterCountBadgeOnPurple}>
+                <Text style={styles.filterCountBadgeOnPurpleText}>{activeFilterCount}</Text>
               </View>
-              <Text style={[
-                styles.employeeChipText,
-                !selectedEmployeeId && styles.activeEmployeeChipText
-              ]}>
-                All Staff
-              </Text>
-            </TouchableOpacity>
-
-            {/* Individual Employee Chips */}
-            {employees.map(emp => {
-              const isActive = selectedEmployeeId === emp.id;
-
-              return (
-                <TouchableOpacity
-                  key={emp.id}
-                  style={[
-                    styles.employeeChip,
-                    isActive && styles.activeEmployeeChip
-                  ]}
-                  onPress={() => setSelectedEmployeeId(emp.id)}
-                  activeOpacity={0.85}>
-                  <UserAvatar
-                    name={emp.name}
-                    userId={emp.id}
-                    size={wp(6)}
-                  />
-                  <Text style={[
-                    styles.employeeChipText,
-                    isActive && styles.activeEmployeeChipText
-                  ]}>
-                    {emp.name ? emp.name.split(' ')[0] : 'Staff'}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+            )}
+          </TouchableOpacity>
         </View>
 
         {loading ? (
@@ -1686,20 +1951,8 @@ const ShiftTrackerScreen = () => {
             {filteredSessions.length === 0 ? (
               <ScrollView contentContainerStyle={styles.emptyContainer}>
                 <Icon name="users" size={wp(14)} color="rgba(255,255,255,0.15)" />
-                <Text style={styles.emptyTitle}>
-                  {selectedEmployeeId
-                    ? `No Shifts Tracked for ${selectedEmployeeName}`
-                    : isTodaySelected
-                      ? 'No Shifts Tracked Today'
-                      : `No Shifts Tracked on ${formatSelectedDateDisplay(selectedDate)}`}
-                </Text>
-                <Text style={styles.emptySubtitle}>
-                  {selectedEmployeeId
-                    ? 'This employee has not clocked in on this date.'
-                    : isTodaySelected
-                      ? 'No employee has clocked in yet today.'
-                      : 'No employee shifts found for this date.'}
-                </Text>
+                <Text style={styles.emptyTitle}>{filteredEmptyState.title}</Text>
+                <Text style={styles.emptySubtitle}>{filteredEmptyState.subtitle}</Text>
               </ScrollView>
             ) : (
               <FlatList
@@ -2018,6 +2271,8 @@ const ShiftTrackerScreen = () => {
                             prioColor = '#F5C542';
                           }
 
+                          const taskDatesLine = buildTaskDatesLine(task);
+
                           return (
                             <View
                               key={task.id}
@@ -2040,6 +2295,12 @@ const ShiftTrackerScreen = () => {
                               {task.description ? (
                                 <Text style={styles.taskItemDesc} numberOfLines={2}>
                                   {task.description}
+                                </Text>
+                              ) : null}
+
+                              {taskDatesLine ? (
+                                <Text style={styles.taskDatesLine} numberOfLines={2}>
+                                  {taskDatesLine}
                                 </Text>
                               ) : null}
 
@@ -2252,6 +2513,8 @@ const ShiftTrackerScreen = () => {
                                           label = 'Done';
                                         }
 
+                                        const taskDatesLine = buildTaskDatesLine(task);
+
                                         return (
                                           <View key={task.id} style={styles.dropdownTaskItem}>
                                             <View style={styles.dropdownTaskMain}>
@@ -2261,6 +2524,11 @@ const ShiftTrackerScreen = () => {
                                               <Text style={styles.dropdownTaskProject} numberOfLines={1}>
                                                 {task.project_name || task.project || 'General'}
                                               </Text>
+                                              {taskDatesLine ? (
+                                                <Text style={styles.taskDatesLine} numberOfLines={1}>
+                                                  {taskDatesLine}
+                                                </Text>
+                                              ) : null}
                                             </View>
                                             <View style={styles.dropdownTaskMeta}>
                                               <View style={[styles.dropdownStatusBadge, { backgroundColor: badgeBg }]}>
@@ -2340,6 +2608,15 @@ const ShiftTrackerScreen = () => {
                   ) : null}
                 </View>
 
+                {selectedTaskDatesLine ? (
+                  <View style={styles.taskModalSection}>
+                    <Text style={styles.taskModalSectionLabel}>Dates</Text>
+                    <Text style={styles.taskModalSectionContent}>
+                      {selectedTaskDatesLine}
+                    </Text>
+                  </View>
+                ) : null}
+
                 {/* Description */}
                 <View style={styles.taskModalSection}>
                   <Text style={styles.taskModalSectionLabel}>Description / Work Notes</Text>
@@ -2396,6 +2673,115 @@ const ShiftTrackerScreen = () => {
           </View>
         </Modal>
       )}
+
+      {/* Filters Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}>
+        <View style={styles.filterModalOverlay}>
+          <View style={styles.filterModalCard}>
+            <View style={styles.filterModalHeader}>
+              <Text style={styles.filterModalTitle}>Filters</Text>
+              <TouchableOpacity
+                onPress={() => setShowFilterModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Icon name="x" size={wp(5.5)} color={darkTextSecondaryColor} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.filterModalScroll}>
+              {/* Date */}
+              <Text style={styles.filterGroupLabel}>Date</Text>
+              <TouchableOpacity
+                style={styles.filterDateRow}
+                onPress={() => { setShowFilterModal(false); setShowDatePicker(true); }}
+                activeOpacity={0.85}>
+                <Icon name="calendar" size={wp(4) } color={PURPLE} />
+                <Text style={styles.filterDateText}>{formatSelectedDateDisplay(selectedDate)}</Text>
+                {!isTodaySelected && (
+                  <TouchableOpacity onPress={() => setSelectedDate(new Date())} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Text style={styles.filterDateTodayBtn}>Today</Text>
+                  </TouchableOpacity>
+                )}
+                <Icon name="chevron-right" size={wp(4)} color={darkTextSecondaryColor} />
+              </TouchableOpacity>
+
+              {/* Status */}
+              <Text style={styles.filterGroupLabel}>Status</Text>
+              <View style={styles.filterChipWrap}>
+                {TRACKER_STATUS_FILTERS.map(filter => {
+                  const isActive = trackerFilter === filter.id;
+
+                  return (
+                    <TouchableOpacity
+                      key={filter.id}
+                      style={[styles.statusFilterChip, isActive && styles.activeStatusFilterChip]}
+                      onPress={() => setTrackerFilter(filter.id)}
+                      activeOpacity={0.85}>
+                      <Icon name={filter.icon} size={wp(3)} color={isActive ? '#ffffff' : filter.color} />
+                      <Text style={[styles.statusFilterChipText, isActive && styles.activeStatusFilterChipText]}>
+                        {filter.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Department */}
+              {departments.length > 0 && (
+                <>
+                  <Text style={styles.filterGroupLabel}>Department</Text>
+                  <View style={styles.filterChipWrap}>
+                    <TouchableOpacity
+                      style={[styles.deptFilterChip, !selectedDepartment && styles.activeDeptFilterChip]}
+                      onPress={() => setSelectedDepartment(null)}
+                      activeOpacity={0.85}>
+                      <Icon name="layers" size={wp(3)} color={!selectedDepartment ? '#ffffff' : PURPLE} />
+                      <Text style={[styles.deptFilterChipText, !selectedDepartment && styles.activeDeptFilterChipText]}>
+                        All Depts
+                      </Text>
+                    </TouchableOpacity>
+                    {departments.map(dept => {
+                      const isActive = selectedDepartment === dept;
+
+                      return (
+                        <TouchableOpacity
+                          key={dept}
+                          style={[styles.deptFilterChip, isActive && styles.activeDeptFilterChip]}
+                          onPress={() => setSelectedDepartment(isActive ? null : dept)}
+                          activeOpacity={0.85}>
+                          <Icon name="briefcase" size={wp(3)} color={isActive ? '#ffffff' : darkTextSecondaryColor} />
+                          <Text style={[styles.deptFilterChipText, isActive && styles.activeDeptFilterChipText]}>
+                            {dept}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+            </ScrollView>
+
+            <View style={styles.filterModalFooter}>
+              <TouchableOpacity
+                style={styles.filterResetBtn}
+                onPress={clearAllFilters}
+                activeOpacity={0.85}>
+                <Icon name="rotate-ccw" size={wp(3.8)} color="#F85149" />
+                <Text style={styles.filterResetBtnText}>Reset</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.filterApplyBtn}
+                onPress={() => setShowFilterModal(false)}
+                activeOpacity={0.85}>
+                <Text style={styles.filterApplyBtnText}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Calendar Picker Modal */}
       <Modal
@@ -2502,6 +2888,217 @@ const styles = StyleSheet.create({
     ...style.fontSizeSmall,
     color: darkTextSecondaryColor,
     marginTop: hp(0.3),
+  },
+  filterBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(2),
+    marginHorizontal: wp(4),
+    marginTop: hp(1),
+    marginBottom: hp(1),
+  },
+  searchContainerMain: {
+    flex: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: darkSurfaceColor,
+    paddingHorizontal: wp(3),
+    height: hp(5.6),
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+  },
+  filterOpenBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: wp(1.5),
+    height: hp(5.6),
+    backgroundColor: darkSurfaceColor,
+    paddingHorizontal: wp(2),
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+  },
+  filterOpenBtnText: {
+    ...style.fontSizeSmall,
+    ...style.fontWeightMedium,
+    color: darkTextPrimaryColor,
+  },
+  filterOpenBtnActive: {
+    backgroundColor: PURPLE,
+    borderColor: PURPLE,
+  },
+  filterCountBadgeOnPurple: {
+    minWidth: wp(4.5),
+    height: wp(4.5),
+    borderRadius: wp(2.25),
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: wp(1),
+  },
+  filterCountBadgeOnPurpleText: {
+    fontSize: wp(2.7),
+    fontWeight: '700',
+    color: PURPLE,
+  },
+  filterOpenBtnTextActive: {
+    color: '#ffffff',
+  },
+  filterCountBadge: {
+    minWidth: wp(4.8),
+    height: wp(4.8),
+    borderRadius: wp(2.4),
+    backgroundColor: PURPLE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: wp(1),
+  },
+  filterCountBadgeText: {
+    fontSize: wp(2.7),
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  filterClearBtn: {
+    width: wp(11),
+    height: wp(11),
+    borderRadius: wp(3),
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(248, 81, 73, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(248, 81, 73, 0.35)',
+  },
+  filterModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'flex-end',
+  },
+  filterModalCard: {
+    backgroundColor: darkBackgroundColor,
+    borderTopLeftRadius: wp(5),
+    borderTopRightRadius: wp(5),
+    maxHeight: '85%',
+    borderTopWidth: 1,
+    borderColor: darkBorderColor,
+  },
+  filterModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: wp(5),
+    paddingVertical: hp(2),
+    borderBottomWidth: 1,
+    borderBottomColor: darkBorderColor,
+  },
+  filterModalTitle: {
+    ...style.fontSizeLarge,
+    ...style.fontWeightBold,
+    color: darkTextPrimaryColor,
+  },
+  filterModalScroll: {
+    paddingHorizontal: wp(5),
+    paddingBottom: hp(2),
+  },
+  filterGroupLabel: {
+    fontSize: wp(2.9),
+    ...style.fontWeightBold,
+    color: darkTextSecondaryColor,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: hp(2),
+    marginBottom: hp(1),
+  },
+  filterChipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: wp(2),
+  },
+  filterDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(2.5),
+    backgroundColor: darkSurfaceColor,
+    paddingHorizontal: wp(3.5),
+    paddingVertical: hp(1.4),
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+  },
+  filterDateText: {
+    flex: 1,
+    ...style.fontSizeNormal,
+    color: darkTextPrimaryColor,
+  },
+  filterDateTodayBtn: {
+    fontSize: wp(3),
+    color: PURPLE,
+    ...style.fontWeightBold,
+  },
+  filterModalFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(3),
+    paddingHorizontal: wp(5),
+    paddingTop: hp(1.5),
+    paddingBottom: hp(3),
+    borderTopWidth: 1,
+    borderTopColor: darkBorderColor,
+  },
+  filterResetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: wp(2),
+    paddingVertical: hp(1.6),
+    paddingHorizontal: wp(5),
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: 'rgba(248, 81, 73, 0.4)',
+    backgroundColor: 'rgba(248, 81, 73, 0.08)',
+  },
+  filterResetBtnText: {
+    ...style.fontSizeNormal,
+    color: '#F85149',
+    ...style.fontWeightMedium,
+  },
+  filterApplyBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: hp(1.6),
+    borderRadius: wp(2.5),
+    backgroundColor: PURPLE,
+  },
+  filterApplyBtnText: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightBold,
+    color: '#ffffff',
+  },
+  deptFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(1),
+    paddingHorizontal: wp(2.4),
+    paddingVertical: hp(0.55),
+    borderRadius: wp(3),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  activeDeptFilterChip: {
+    backgroundColor: PURPLE,
+    borderColor: PURPLE,
+  },
+  deptFilterChipText: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+    ...style.fontWeightMedium,
+  },
+  activeDeptFilterChipText: {
+    color: '#ffffff',
   },
   timeAxisRow: {
     flexDirection: 'row',
@@ -3033,6 +3630,25 @@ const styles = StyleSheet.create({
   miniProgressSegment: {
     height: '100%',
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: darkSurfaceColor,
+    paddingHorizontal: wp(3),
+    height: hp(5.5),
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+  },
+  searchIcon: {
+    marginRight: wp(2),
+  },
+  searchInput: {
+    flex: 1,
+    color: darkTextPrimaryColor,
+    ...style.fontSizeNormal,
+    height: '100%',
+  },
   historySummaryText: {
     fontSize: wp(2.5),
     color: darkTextSecondaryColor,
@@ -3134,6 +3750,12 @@ const styles = StyleSheet.create({
     opacity: 0.8,
     marginTop: hp(0.6),
     lineHeight: hp(1.8),
+  },
+  taskDatesLine: {
+    fontSize: wp(2.4),
+    color: darkTextSecondaryColor,
+    opacity: 0.85,
+    marginTop: hp(0.4),
   },
   taskItemFooter: {
     flexDirection: 'row',
@@ -3245,6 +3867,23 @@ const styles = StyleSheet.create({
   taskModeTasksList: {
     gap: hp(1.6),
   },
+  taskExpandBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: wp(1.5),
+    paddingVertical: hp(0.8),
+    marginTop: hp(0.4),
+    borderRadius: wp(2),
+    borderWidth: 1,
+    borderColor: 'rgba(155, 89, 182, 0.35)',
+    backgroundColor: 'rgba(155, 89, 182, 0.08)',
+  },
+  taskExpandBtnText: {
+    fontSize: wp(2.8),
+    color: PURPLE,
+    ...style.fontWeightMedium,
+  },
   taskModeItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3329,7 +3968,7 @@ const styles = StyleSheet.create({
   },
   taskModalHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingHorizontal: wp(5),
     paddingVertical: hp(2),
@@ -3434,11 +4073,42 @@ const styles = StyleSheet.create({
   filtersContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: darkSurfaceColor,
-    borderBottomWidth: 1,
-    borderBottomColor: darkBorderColor,
-    paddingHorizontal: wp(3),
-    paddingVertical: hp(1.2),
+  },
+  statusFilterScrollView: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  statusFilterScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(1.4),
+    paddingVertical: hp(0.5),
+  },
+  employeeFilterScroll: {
+    flex: 1,
+  },
+  statusFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(1),
+    paddingHorizontal: wp(2.2),
+    paddingVertical: hp(0.4),
+    borderRadius: wp(3),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+  },
+  activeStatusFilterChip: {
+    backgroundColor: PURPLE,
+    borderColor: PURPLE,
+  },
+  statusFilterChipText: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+    ...style.fontWeightMedium,
+  },
+  activeStatusFilterChipText: {
+    color: '#ffffff',
   },
   scrollDateChip: {
     flexDirection: 'row',

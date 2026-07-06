@@ -88,7 +88,7 @@ const AiAssistantModal = ({ visible, onClose, badgeCount = 4 }) => {
       onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}>
         <TouchableOpacity
           style={styles.backdrop}
           activeOpacity={1}

@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -78,7 +79,16 @@ const CustomDrawer = () => {
   const canShowHrms = isCeoAdminUser(user) || isHrManagerUser(user);
 
   const menuItems = useMemo(() => {
-    const items = [...MENU_ITEMS];
+    let items = [...MENU_ITEMS];
+
+    if (isCeoAdminUser(user)) {
+      items = items.filter(
+        item =>
+          item.route !== MAIN_ROUTES.PROJECTS_WORK &&
+          item.route !== MAIN_ROUTES.TIME_SHEET
+      );
+    }
+
     if (canShowHrms) {
       const profileIndex = items.findIndex(item => item.route === MAIN_ROUTES.PROFILE);
       if (profileIndex !== -1) {
@@ -96,7 +106,7 @@ const CustomDrawer = () => {
       }
     }
     
-    if (isHrManagerUser(user)) {
+    if (isHrManagerUser(user) || isCeoAdminUser(user)) {
       const profileIndex = items.findIndex(item => item.route === MAIN_ROUTES.PROFILE);
       if (profileIndex !== -1) {
         items.splice(profileIndex, 0, {
@@ -118,6 +128,13 @@ const CustomDrawer = () => {
         route: MAIN_ROUTES.RECRUITER_DASHBOARD,
         label: 'Recruitment (ATS)',
         icon: 'user-plus',
+      });
+      
+      // // Add Payroll Tab
+      items.splice(recruiterIndex + 2, 0, {
+        route: MAIN_ROUTES.PAYROLL_ADMIN,
+        label: 'Payroll Dashboard',
+        icon: 'dollar-sign',
       });
     }
 
@@ -322,7 +339,10 @@ const CustomDrawer = () => {
               <Text style={styles.version}>{COMMAND_CENTER_VERSION}</Text>
             </View>
 
-            <View style={styles.menuSection}>
+            <ScrollView 
+              style={styles.menuSection}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: hp(2) }}>
               {menuItems.map(item => {
                 const isActive = activeRoute === item.route;
                 const badge =
@@ -351,7 +371,7 @@ const CustomDrawer = () => {
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </ScrollView>
           </View>
 
           <View style={styles.userSection}>

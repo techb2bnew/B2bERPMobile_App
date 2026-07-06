@@ -53,7 +53,7 @@ import {
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
 import { useAuth } from '../../context/AuthContext';
-import { isSupabaseConfigured } from '../../lib/supabase';
+import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 import {
   fetchChannelMembersList,
   fetchChannelMemberLastReadAt,
@@ -154,7 +154,7 @@ const ChannelChatScreen = () => {
   const [attachOpen, setAttachOpen] = useState(false);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   const [peerLastReadAt, setPeerLastReadAt] = useState(null);
-  
+
   // New States for Members & Reactions
   const [membersList, setMembersList] = useState([]);
   const [membersModalVisible, setMembersModalVisible] = useState(false);
@@ -216,7 +216,7 @@ const ChannelChatScreen = () => {
 
       if (isSupabaseConfigured) {
         try {
-          const resolved = await resolveChannelForChatParams(user.id, {
+          let resolved = await resolveChannelForChatParams(user.id, {
             chatType,
             chatId,
             channelId: nextChannelId,
@@ -225,7 +225,36 @@ const ChannelChatScreen = () => {
             memberIds,
             currentUserName: user.name,
           });
-          nextChannelId = resolved.channelId || resolved.chatId;
+
+          if (resolved.channelId || resolved.chatId) {
+            nextChannelId = resolved.channelId || resolved.chatId;
+
+            // If the local params seem incomplete (e.g. from a killed app push notification)
+            // let's fetch the definitive channel data to ensure the UI is perfect.
+            const { data: channelData } = await getSupabase()
+              .from('chat_channels')
+              .select('name, channel_type')
+              .eq('id', nextChannelId)
+              .maybeSingle();
+
+            if (channelData) {
+              const isDm = channelData.channel_type === 'dm' || channelData.channel_type === 'direct';
+              navigation.setParams({
+                chatType: isDm ? 'direct' : 'group',
+                chatName: !isDm && channelData.name ? channelData.name : resolvedChatName,
+              });
+
+              if (!isDm) {
+                const { count } = await getSupabase()
+                  .from('chat_channel_members')
+                  .select('*', { count: 'exact', head: true })
+                  .eq('channel_id', nextChannelId);
+                if (count !== null) {
+                  navigation.setParams({ members: count });
+                }
+              }
+            }
+          }
         } catch (error) {
           if (__DEV__) {
             console.log('[chat] resolve channel failed', error?.message);
@@ -288,7 +317,7 @@ const ChannelChatScreen = () => {
       newMessage => {
         appendMessage(newMessage);
         if (user?.id) {
-          markChannelAsRead({ channelId: effectiveChannelId, userId: user.id }).catch(() => {});
+          markChannelAsRead({ channelId: effectiveChannelId, userId: user.id }).catch(() => { });
         }
         if (isDirect && peerId && newMessage.senderId === peerId) {
           scheduleReadReceiptRefresh();
@@ -710,7 +739,7 @@ const ChannelChatScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -792,8 +821,8 @@ const ChannelChatScreen = () => {
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'height' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}>
+        behavior={Platform.OS === 'ios' ? 'height' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 30}>
         {loading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="small" color={PURPLE} />
@@ -873,7 +902,7 @@ const ChannelChatScreen = () => {
         transparent
         animationType="fade"
         statusBarTranslucent
-        onRequestClose={() => {}}>
+        onRequestClose={() => { }}>
         <View style={styles.uploadOverlay}>
           <View style={styles.uploadCard}>
             <ActivityIndicator size="large" color={PURPLE} />

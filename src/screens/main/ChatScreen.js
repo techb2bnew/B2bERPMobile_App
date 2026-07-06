@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import AiAssistant from '../../components/AiAssistant';
 import AppHeader from '../../components/AppHeader';
@@ -158,6 +158,35 @@ const ChatScreen = () => {
 
     return unsubscribe;
   }, [loadThreads, user?.id]);
+
+  const route = useRoute();
+  useEffect(() => {
+    if (route.params?.autoOpenChat) {
+      const chatParams = route.params.autoOpenChat;
+      
+      const timer = setTimeout(() => {
+        navigation.setParams({ autoOpenChat: undefined });
+        let finalParams = { ...chatParams };
+        if (chatParams.channelId && threads?.length > 0) {
+          const existingThread = threads.find(
+            t => t.channelId === chatParams.channelId || t.chatId === chatParams.channelId
+          );
+          if (existingThread) {
+            finalParams = {
+              ...existingThread,
+              ...chatParams,
+              chatType: existingThread.chatType || chatParams.chatType,
+              members: existingThread.members || chatParams.members,
+              peerId: existingThread.peerId || chatParams.peerId,
+            };
+          }
+        }
+        openChat(finalParams);
+      }, 1500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [route.params?.autoOpenChat, navigation, threads]);
 
   const filteredThreads = useMemo(() => {
     let list = threads;

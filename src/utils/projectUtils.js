@@ -196,6 +196,23 @@ export const parseDueDateToKey = value => {
   return '';
 };
 
+export const normalizeTaskDateKey = value => {
+  if (!value) {
+    return '';
+  }
+
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed.slice(0, 10);
+  }
+
+  return parseDueDateToKey(trimmed);
+};
+
 export const formatTaskDate = value => {
   if (!value) {
     return '';
@@ -239,6 +256,14 @@ export const formatTaskEstimateHours = value => {
   return cleaned ? `${cleaned}h` : '';
 };
 
+const getTodayDateKey = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const isCreatedToday = dateValue => {
   if (!dateValue) {
     return false;
@@ -260,6 +285,15 @@ export const isCreatedToday = dateValue => {
     created.getMonth() === today.getMonth() &&
     created.getDate() === today.getDate()
   );
+};
+
+export const isTaskScheduledToday = item => {
+  const taskDateKey = normalizeTaskDateKey(item?.task_date ?? item?.taskDate);
+  if (taskDateKey) {
+    return taskDateKey === getTodayDateKey();
+  }
+
+  return isCreatedToday(item?.created_at ?? item?.created_date ?? item?.createdDate);
 };
 
 export const isDueToday = dueValue => {

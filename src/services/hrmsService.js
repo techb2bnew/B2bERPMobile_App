@@ -1,5 +1,6 @@
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { getLocalDateKey } from './clockSessionsService';
+import { isCeoAdminUser } from '../constants/roles';
 
 const CLOCK_SESSIONS_TABLE = 'clock_sessions';
 const CLOCK_SESSION_SEGMENTS_TABLE = 'clock_session_segments';
@@ -8,13 +9,13 @@ const EMPLOYEE_PROFILES_TABLE = 'employee_profiles';
 
 // Mock list of employees for fallback
 const MOCK_EMPLOYEES = [
-  { id: 'emp-1', name: 'Kartik', role: 'Developer', dept: 'Digital Marketing', base_salary: 35000 },
-  { id: 'emp-2', name: 'Abhishek Thakur', role: 'Developer', dept: 'Digital Marketing', base_salary: 40000 },
-  { id: 'emp-3', name: 'Saravjeet Singh', role: 'Developer', dept: 'Digital Marketing', base_salary: 38000 },
-  { id: 'emp-4', name: 'Anila Iqbal', role: 'Developer', dept: 'Development', base_salary: 45000 },
-  { id: 'emp-5', name: 'Rajnish Kaur', role: 'UI Designer', dept: 'Digital Marketing', base_salary: 32000 },
-  { id: 'emp-6', name: 'Gurbaksh Singh', role: 'Senior Developer', dept: 'Development', base_salary: 60000 },
-  { id: 'emp-7', name: 'Saurabh Bhatia', role: 'Manager', dept: 'Management', base_salary: 75000 },
+  { id: 'emp-1', name: 'Kartik', role: 'Developer', dept: 'Digital Marketing', salary: 35000 },
+  { id: 'emp-2', name: 'Abhishek Thakur', role: 'Developer', dept: 'Digital Marketing', salary: 40000 },
+  { id: 'emp-3', name: 'Saravjeet Singh', role: 'Developer', dept: 'Digital Marketing', salary: 38000 },
+  { id: 'emp-4', name: 'Anila Iqbal', role: 'Developer', dept: 'Development', salary: 45000 },
+  { id: 'emp-5', name: 'Rajnish Kaur', role: 'UI Designer', dept: 'Digital Marketing', salary: 32000 },
+  { id: 'emp-6', name: 'Gurbaksh Singh', role: 'Senior Developer', dept: 'Development', salary: 60000 },
+  { id: 'emp-7', name: 'Saurabh Bhatia', role: 'Manager', dept: 'Management', salary: 75000 },
 ];
 
 // Helper to get number of days in a month
@@ -36,6 +37,28 @@ export const isWeeklyOffDate = (year, month, day) => {
   return false;
 };
 
+export const getCurrentHrmsMonthKey = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+};
+
+export const getRecentHrmsMonths = (count = 4) => {
+  const months = [];
+  const now = new Date();
+
+  for (let offset = 0; offset < count; offset += 1) {
+    const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    months.push({
+      key: `${year}-${month}`,
+      label: date.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+    });
+  }
+
+  return months;
+};
+
 // Dynamic date generator for a month
 export const getMonthDatesList = (monthKey) => {
   const [year, month] = monthKey.split('-').map(Number);
@@ -52,6 +75,27 @@ export const getMonthDatesList = (monthKey) => {
 export const SHIFT_FULL_DAY_HOURS = 8.0;    // Net working hours required for full day
 export const SHIFT_SHORT_LEAVE_HOURS = 6.0; // Short Leave threshold (worked ≥ 6h but < 8h)
 export const SHIFT_HALF_DAY_HOURS = 4.5;    // Half Day threshold (worked ≥ 4.5h but < 6h)
+
+export const HRMS_STATUS_DISPLAY = {
+  'Full Day': { letter: 'P', color: '#3DDC84', label: 'Full Day' },
+  'Present': { letter: 'P', color: '#1ABC9C', label: 'Present' },
+  'Short Leave': { letter: 'SL', color: '#D35400', label: 'Short Leave' },
+  'Half Day': { letter: 'H', color: '#F39C12', label: 'Half Day' },
+  'Absent': { letter: 'A', color: '#F85149', label: 'Absent' },
+  'Leave': { letter: 'L', color: '#F85149', label: 'Leave' },
+  'Paid Leave': { letter: 'PL', color: '#3498DB', label: 'Paid Leave' },
+  'Unpaid Leave': { letter: 'UL', color: '#F85149', label: 'Unpaid Leave' },
+  'Sandwich Leave': { letter: 'SW', color: '#E85D5D', label: 'Sandwich Leave' },
+  'Weekly Off': { letter: 'O', color: '#555555', label: 'Weekly Off' },
+  'No Record': { letter: '-', color: '#333333', label: 'No Record' },
+  'Future': { letter: '-', color: '#333333', label: 'Future' },
+};
+
+export const getHrmsStatusDisplay = (status) =>
+  HRMS_STATUS_DISPLAY[status] || { letter: '-', color: '#444444', label: status || 'Unknown' };
+
+const filterHrmsAttendanceEmployees = (employees = []) =>
+  employees.filter(emp => !isCeoAdminUser({ role: emp?.role }));
 
 // Calculate attendance status based on work hours, leave records, and calendar day type
 export const calculateDayStatus = ({ hoursWorked, hasFullLeave, hasHalfLeave, isWeeklyOff, hasClockOut, hasClockIn }) => {
@@ -100,15 +144,15 @@ export const fetchHrmsMonthlyData = async (monthKey) => {
     const startOfMonth = `${monthKey}-01T00:00:00.000Z`;
     const endOfMonth = `${monthKey}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
 
-    // 1. Fetch all employees (resilient to missing base_salary column)
+    // 1. Fetch all employees (resilient to missing salary column)
     let employees = [];
     const { data: empsWithSalary, error: empError } = await supabase
       .from(EMPLOYEE_PROFILES_TABLE)
-      .select('id, name, role, dept, base_salary')
+      .select('id, name, role, dept, salary')
       .order('name');
 
     if (empError) {
-      console.warn('Failed to fetch base_salary column, fetching without it:', empError.message);
+      console.warn('Failed to fetch salary column, fetching without it:', empError.message);
       const { data: empsNoSalary, error: fallbackError } = await supabase
         .from(EMPLOYEE_PROFILES_TABLE)
         .select('id, name, role, dept')
@@ -117,14 +161,16 @@ export const fetchHrmsMonthlyData = async (monthKey) => {
       if (fallbackError) throw fallbackError;
       employees = (empsNoSalary || []).map(emp => ({
         ...emp,
-        base_salary: 30000, // Default fallback base salary
+        base_salary: 0, // Fallback to 0 so we see warning
       }));
     } else {
       employees = (empsWithSalary || []).map(emp => ({
         ...emp,
-        base_salary: emp.base_salary || 30000,
+        base_salary: emp.salary || 0,
       }));
     }
+
+    employees = filterHrmsAttendanceEmployees(employees);
 
     // 2. Fetch all clock sessions for the month (with IDs for segment lookup)
     const { data: clockSessions, error: clockError } = await supabase
@@ -150,13 +196,17 @@ export const fetchHrmsMonthlyData = async (monthKey) => {
       }
     }
 
-    // 3. Fetch all approved leaves overlapping with the month
+    // 3. Fetch all approved leaves for the whole quarter overlapping with the month
+    const quarter = Math.ceil(month / 3);
+    const quarterStartMonth = (quarter - 1) * 3 + 1;
+    const quarterStart = `${year}-${String(quarterStartMonth).padStart(2, '0')}-01T00:00:00.000Z`;
+
     const { data: approvedLeaves, error: leaveError } = await supabase
       .from(LEAVE_REQUESTS_TABLE)
       .select('employee_id, start_date, end_date, leave_type')
       .eq('status', 'Approved')
       .lte('start_date', endOfMonth)
-      .gte('end_date', startOfMonth);
+      .gte('end_date', quarterStart);
 
     if (leaveError) throw leaveError;
 
@@ -170,6 +220,7 @@ export const fetchHrmsMonthlyData = async (monthKey) => {
 // Aggregate database queries into month-wise matrix
 // segments: array of { session_id, kind, label, started_at, ended_at }
 const processHrmsAggregation = (monthKey, employees, clockSessions, approvedLeaves, segments = []) => {
+  const attendanceEmployees = filterHrmsAttendanceEmployees(employees);
   const [year, month] = monthKey.split('-').map(Number);
   const totalDays = getDaysInMonth(year, month);
   const datesList = getMonthDatesList(monthKey);
@@ -277,22 +328,16 @@ const processHrmsAggregation = (monthKey, employees, clockSessions, approvedLeav
     }
   });
 
-  const employeeData = employees.map(emp => {
+  const employeeData = attendanceEmployees.map(emp => {
     const dayWise = {};
-    let presentCount = 0;
-    let halfDayCount = 0;
-    let absentCount = 0;
-    let leaveCount = 0;
-    let weeklyOffCount = 0;
-
     const todayKey = getLocalDateKey();
 
+    // Pass 1: Build raw status for all dates
     datesList.forEach((dateKey, index) => {
       const day = index + 1;
-      const workingHours = workHoursMap[emp.id]?.[dateKey] || 0; // Only 'working' segments from DB
-      const meetingMins = meetingMinsMap[emp.id]?.[dateKey] || 0; // Meeting time from segments
-      const breakMins = breakMinsMap[emp.id]?.[dateKey] || 0;     // Lunch/tea break from segments
-      // Net working hours = working time + meeting time (meetings count as productive work)
+      const workingHours = workHoursMap[emp.id]?.[dateKey] || 0;
+      const meetingMins = meetingMinsMap[emp.id]?.[dateKey] || 0;
+      const breakMins = breakMinsMap[emp.id]?.[dateKey] || 0;
       const hoursWorked = workingHours + (meetingMins / 60);
       const hasSessionToday = workSessionsMap[emp.id]?.[dateKey] === true;
       const leaveType = leavesMap[emp.id]?.[dateKey];
@@ -306,14 +351,12 @@ const processHrmsAggregation = (monthKey, employees, clockSessions, approvedLeav
       const hasClockOut = workClockOutPresentMap[emp.id]?.[dateKey] === true;
       const hasClockIn = hasSessionToday;
 
-      // Compute total duration in minutes (from earliest clock_in to latest clock_out)
       let totalMins = 0;
       if (clockInVal && clockOutVal) {
         totalMins = Math.round((new Date(clockOutVal) - new Date(clockInVal)) / 60000);
       } else if (clockInVal && dateKey === todayKey) {
         totalMins = Math.round((Date.now() - new Date(clockInVal)) / 60000);
       }
-      // lunchMins = breakMins (lunch/tea only — meetings NOT counted as break)
       const lunchMins = breakMins;
 
       let status = 'Absent';
@@ -322,62 +365,108 @@ const processHrmsAggregation = (monthKey, employees, clockSessions, approvedLeav
       } else if (isFuture) {
         status = 'Future';
       } else if (dateKey === todayKey) {
-        // For today: if clocked in, calculate based on hours so far
         if (hasSessionToday) {
-          if (hoursWorked >= SHIFT_FULL_DAY_HOURS) {
-            status = 'Full Day';
-          } else if (hoursWorked >= SHIFT_SHORT_LEAVE_HOURS) {
-            // If still active (no clock_out), show as Present (working), else Short Leave
-            status = hasClockOut ? 'Short Leave' : 'Present';
-          } else if (hoursWorked >= SHIFT_HALF_DAY_HOURS) {
-            status = hasClockOut ? 'Half Day' : 'Present';
-          } else {
-            // Actively clocked in but low hours — treat as Present (still working)
-            status = 'Present';
-          }
+          if (hoursWorked >= SHIFT_FULL_DAY_HOURS) status = 'Full Day';
+          else if (hoursWorked >= SHIFT_SHORT_LEAVE_HOURS) status = hasClockOut ? 'Short Leave' : 'Present';
+          else if (hoursWorked >= SHIFT_HALF_DAY_HOURS) status = hasClockOut ? 'Half Day' : 'Present';
+          else status = 'Present'; // Actively working
         } else if (isWeeklyOff) {
           status = 'Weekly Off';
         } else {
           status = 'Absent';
         }
       } else {
-        // Past day: use proper status calculation
-        status = calculateDayStatus({
-          hoursWorked,
-          hasFullLeave,
-          hasHalfLeave,
-          isWeeklyOff,
-          hasClockOut,
-          hasClockIn,
-        });
+        status = calculateDayStatus({ hoursWorked, hasFullLeave, hasHalfLeave, isWeeklyOff, hasClockOut, hasClockIn });
       }
 
-      // Update counters
-      if (status === 'Full Day') presentCount++;
-      else if (status === 'Present') presentCount++; // 'Present' < 4.5h still counts as somewhat present, but maybe 0.5? We'll just count as present for the summary tally. Wait, for payroll we'll do 0.5? The screenshot says Present (<4.5h), so they are present. Let's just track it in presentCount for now.
-      else if (status === 'Half Day') halfDayCount++;
-      else if (status === 'Short Leave') halfDayCount++; // Short Leave counts as 0.5 day for payroll
-      else if (status === 'Absent') absentCount++;
-      else if (status === 'Leave') leaveCount++;
-      else if (status === 'Weekly Off') weeklyOffCount++;
-
-
       dayWise[dateKey] = {
-        status,
-        hours: hoursWorked,       // net working hours = working + meeting
-        workingHours,             // pure working segment hours from DB
-        clockIn: clockInVal,
-        clockOut: clockOutVal,
-        totalMins,                // total duration from first clock-in to last clock-out
-        lunchMins,                // break/lunch time (excludes meetings)
-        meetingMins,              // meeting time (counts as productive work)
-        breakMins,                // tea/personal/lunch breaks (does not count)
+        status, hours: hoursWorked, workingHours, clockIn: clockInVal, clockOut: clockOutVal,
+        totalMins, lunchMins, meetingMins, breakMins,
       };
     });
 
-    // Payable Days = Presents + (0.5 * Half Days) + Leaves (Paid)
-    // Note: Assuming all approved leaves are paid leaves for initial projection
-    const payableDays = presentCount + (0.5 * halfDayCount) + leaveCount;
+    // Pass 2a: Sandwich Leave Engine
+    // A weekly off is sandwiched if the nearest working day before AND after it in the same month are both Leave/Absent
+    for (let i = 0; i < datesList.length; i++) {
+      if (dayWise[datesList[i]].status === 'Weekly Off') {
+        // Find preceding working day
+        let prevStatus = null;
+        for (let j = i - 1; j >= 0; j--) {
+          if (dayWise[datesList[j]].status !== 'Weekly Off' && dayWise[datesList[j]].status !== 'No Record') {
+            prevStatus = dayWise[datesList[j]].status;
+            break;
+          }
+        }
+        // Find succeeding working day
+        let nextStatus = null;
+        for (let j = i + 1; j < datesList.length; j++) {
+          if (dayWise[datesList[j]].status !== 'Weekly Off' && dayWise[datesList[j]].status !== 'Future') {
+            nextStatus = dayWise[datesList[j]].status;
+            break;
+          }
+        }
+
+        const isPrevLeave = prevStatus === 'Leave' || prevStatus === 'Absent' || prevStatus === 'Unpaid Leave';
+        const isNextLeave = nextStatus === 'Leave' || nextStatus === 'Absent' || nextStatus === 'Unpaid Leave';
+
+        if (isPrevLeave && isNextLeave) {
+          dayWise[datesList[i]].status = 'Sandwich Leave';
+        }
+      }
+    }
+
+    // Pass 2b: Quarter Leave Engine
+    const quarterStartStr = `${year}-${String((Math.ceil(month / 3) - 1) * 3 + 1).padStart(2, '0')}-01`;
+    let pastQuarterLeaves = 0;
+    // Count leaves taken in the quarter before this month
+    approvedLeaves.forEach(leave => {
+      if (leave.employee_id === emp.id) {
+        const start = new Date(leave.start_date);
+        const end = new Date(leave.end_date);
+        const cursor = new Date(start);
+        while (cursor <= end) {
+          const dKey = getLocalDateKey(cursor);
+          if (dKey >= quarterStartStr && dKey < `${year}-${String(month).padStart(2, '0')}-01` && leave.leave_type !== 'Half Day' && leave.leave_type !== 'Short Leave') {
+            pastQuarterLeaves++;
+          }
+          cursor.setDate(cursor.getDate() + 1);
+        }
+      }
+    });
+
+    let currentQuarterLeaves = pastQuarterLeaves;
+    
+    // Pass 3: Final Counters and Pay Deductions
+    let presentCount = 0, halfDayCount = 0, absentCount = 0, paidLeaveCount = 0, unpaidLeaveCount = 0;
+    let weeklyOffCount = 0, sandwichLeaveCount = 0;
+
+    datesList.forEach((dateKey) => {
+      let status = dayWise[dateKey].status;
+      
+      if (status === 'Leave') {
+        if (currentQuarterLeaves < 3) {
+          currentQuarterLeaves++;
+          status = 'Paid Leave';
+        } else {
+          status = 'Unpaid Leave';
+        }
+        dayWise[dateKey].status = status; // Overwrite raw 'Leave' with Paid/Unpaid
+      }
+
+      if (status === 'Full Day') presentCount++;
+      else if (status === 'Present') presentCount++; // Present but <4.5h (we'll count as 1 to match existing behavior, HR can adjust)
+      else if (status === 'Half Day') halfDayCount++;
+      else if (status === 'Short Leave') halfDayCount++; 
+      else if (status === 'Absent') absentCount++;
+      else if (status === 'Paid Leave') paidLeaveCount++;
+      else if (status === 'Unpaid Leave') unpaidLeaveCount++;
+      else if (status === 'Weekly Off') weeklyOffCount++;
+      else if (status === 'Sandwich Leave') sandwichLeaveCount++;
+    });
+
+    // Payable Days = Working Days + Valid Weekly Offs + Paid Leaves + 0.5 * Half/Short Leaves
+    // Absents, Unpaid Leaves, and Sandwich Leaves result in deductions.
+    const payableDays = presentCount + weeklyOffCount + paidLeaveCount + (0.5 * halfDayCount);
 
     return {
       employee: emp,
@@ -386,8 +475,10 @@ const processHrmsAggregation = (monthKey, employees, clockSessions, approvedLeav
         present: presentCount,
         halfDay: halfDayCount,
         absent: absentCount,
-        leave: leaveCount,
+        paidLeave: paidLeaveCount,
+        unpaidLeave: unpaidLeaveCount,
         weeklyOff: weeklyOffCount,
+        sandwichLeave: sandwichLeaveCount,
         payableDays,
       },
     };
@@ -406,7 +497,7 @@ const generateMockHrmsData = (monthKey) => {
   const totalDays = getDaysInMonth(year, month);
   const datesList = getMonthDatesList(monthKey);
 
-  const employees = MOCK_EMPLOYEES.map(emp => {
+  const employees = filterHrmsAttendanceEmployees(MOCK_EMPLOYEES).map(emp => {
     const dayWise = {};
     let presentCount = 0;
     let halfDayCount = 0;
@@ -538,31 +629,31 @@ export const fetchEmployeeHrmsData = async (employeeId, monthKey) => {
     const startOfMonth = `${monthKey}-01T00:00:00.000Z`;
     const endOfMonth = `${monthKey}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
 
-    // Fetch employee profile (resilient to missing base_salary column)
+    // Fetch employee profile (resilient to missing salary column)
     let profile = null;
     const { data: profileWithSalary, error: profileError } = await supabase
       .from(EMPLOYEE_PROFILES_TABLE)
-      .select('id, name, role, dept, base_salary')
+      .select('id, name, role, dept, salary')
       .eq('id', employeeId)
-      .maybeSingle();
+      .single();
 
     if (profileError) {
-      console.warn('Failed to fetch base_salary column for profile, fetching without it:', profileError.message);
-      const { data: profileNoSalary, error: fallbackError } = await supabase
+      console.warn('Failed to fetch salary column for profile, fetching without it:', profileError.message);
+      const { data: profileNoSalary, error: fallbackProfileError } = await supabase
         .from(EMPLOYEE_PROFILES_TABLE)
         .select('id, name, role, dept')
         .eq('id', employeeId)
-        .maybeSingle();
+        .single();
 
-      if (fallbackError) throw fallbackError;
+      if (fallbackProfileError) throw fallbackProfileError;
       profile = {
         ...profileNoSalary,
-        base_salary: 30000, // Default fallback base salary
+        base_salary: 0,
       };
     } else {
       profile = {
         ...profileWithSalary,
-        base_salary: profileWithSalary?.base_salary || 30000,
+        base_salary: profileWithSalary?.salary || 0,
       };
     }
 
@@ -591,14 +682,18 @@ export const fetchEmployeeHrmsData = async (employeeId, monthKey) => {
       }
     }
 
-    // Fetch leaves
+    // Fetch leaves for the quarter
+    const quarter = Math.ceil(month / 3);
+    const quarterStartMonth = (quarter - 1) * 3 + 1;
+    const quarterStart = `${year}-${String(quarterStartMonth).padStart(2, '0')}-01T00:00:00.000Z`;
+
     const { data: approvedLeaves, error: leaveError } = await supabase
       .from(LEAVE_REQUESTS_TABLE)
       .select('employee_id, start_date, end_date, leave_type')
       .eq('employee_id', employeeId)
       .eq('status', 'Approved')
       .lte('start_date', endOfMonth)
-      .gte('end_date', startOfMonth);
+      .gte('end_date', quarterStart);
 
     if (leaveError) throw leaveError;
 
@@ -634,15 +729,7 @@ export const convertHrmsDataToCsv = (datesList, employees) => {
       emp.employee.name,
       emp.employee.role,
       normalizeDepartmentName(emp.employee.dept),
-      ...datesList.map(dateKey => {
-        const status = emp.dayWise[dateKey]?.status;
-        if (status === 'Present') return 'P';
-        if (status === 'Half Day') return 'H';
-        if (status === 'Absent') return 'A';
-        if (status === 'Leave') return 'L';
-        if (status === 'Weekly Off') return 'O';
-        return '-';
-      }),
+      ...datesList.map(dateKey => getHrmsStatusDisplay(emp.dayWise[dateKey]?.status).letter),
     ];
   });
 
@@ -659,8 +746,10 @@ export const calculateSalaryProjection = (baseSalary, summary, totalMonthDays) =
   // 1. Calculate Daily Rate (default is base salary divided by total calendar days)
   const dailyRate = Number(baseSalary || 0) / Number(totalMonthDays || 30);
 
-  // 2. Calculate Payable Days = Presents + (0.5 * Half Days) + Approved Leaves
-  const payableDays = summary.present + (0.5 * summary.halfDay) + summary.leave;
+  // 2. Prefer the HRMS aggregation result so payroll, sandwich leave, and quarter leave quota stay aligned.
+  const payableDays = Number.isFinite(Number(summary?.payableDays))
+    ? Number(summary.payableDays)
+    : (Number(summary?.present || 0) + (0.5 * Number(summary?.halfDay || 0)) + Number(summary?.leave || 0));
 
   // 3. Gross Earnings
   const grossEarnings = Math.round(dailyRate * payableDays);
@@ -693,6 +782,18 @@ export const normalizeDepartmentName = (dept) => {
   }
   if (normalized.includes('design') || normalized.includes('ui') || normalized.includes('ux')) {
     return 'Design';
+  }
+  if (normalized.includes('campus') || normalized.includes('campush')) {
+    return 'B2B Campus Team';
+  }
+  if (
+    normalized === 'csr' ||
+    normalized.includes('customer support') ||
+    normalized.includes('client support') ||
+    normalized.includes('customer service') ||
+    normalized.includes('customer care')
+  ) {
+    return 'Customer Support';
   }
   if (normalized.includes('management') || normalized.includes('admin') || normalized.includes('ceo') || normalized.includes('exec')) {
     return 'Management';

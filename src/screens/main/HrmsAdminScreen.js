@@ -17,7 +17,18 @@ import RNFS from 'react-native-fs';
 import Icon from 'react-native-vector-icons/Feather';
 import RNShare from 'react-native-share';
 import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
-import { fetchHrmsMonthlyData, getMonthDatesList, convertHrmsDataToCsv, calculateSalaryProjection, normalizeDepartmentName } from '../../services/hrmsService';
+import {
+  fetchHrmsMonthlyData,
+  getMonthDatesList,
+  convertHrmsDataToCsv,
+  calculateSalaryProjection,
+  normalizeDepartmentName,
+  getCurrentHrmsMonthKey,
+  getRecentHrmsMonths,
+  HRMS_STATUS_DISPLAY,
+  getHrmsStatusDisplay,
+} from '../../services/hrmsService';
+import { getLocalDateKey } from '../../services/clockSessionsService';
 import {
   darkBackgroundColor,
   darkBorderColor,
@@ -35,25 +46,9 @@ const GREEN = '#3DDC84';
 const YELLOW = '#F39C12';
 const BLUE = '#3498DB';
 
-const STATUS_LETTERS = {
-  'Full Day': { letter: 'P', color: GREEN }, // Main full day presence
-  'Short Leave': { letter: 'SL', color: '#D35400' }, // Dark Orange
-  'Half Day': { letter: 'H', color: YELLOW }, // Yellow/Light Orange
-  'Present': { letter: 'P', color: '#1ABC9C' }, // Teal/Light Green for <4.5h presence
-  'Absent': { letter: 'A', color: RED },
-  'Leave': { letter: 'L', color: BLUE },
-  'Weekly Off': { letter: 'O', color: '#555555' },
-  'Future': { letter: '-', color: '#333333' },
-};
-
-const MONTHS_LIST = [
-  { key: '2026-06', label: 'June 2026' },
-  { key: '2026-05', label: 'May 2026' },
-  { key: '2026-04', label: 'April 2026' },
-];
-
 const HrmsAdminScreen = () => {
-  const [selectedMonth, setSelectedMonth] = useState('2026-06');
+  const monthsList = useMemo(() => getRecentHrmsMonths(4), []);
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentHrmsMonthKey());
   const [activeTab, setActiveTab] = useState('grid'); // 'grid' | 'leaves'
   const [loading, setLoading] = useState(true);
   const [hrmsData, setHrmsData] = useState(null);
@@ -64,7 +59,7 @@ const HrmsAdminScreen = () => {
   const [selectedLeaveDetail, setSelectedLeaveDetail] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDept, setSelectedDept] = useState('All');
-  const [selectedDailyDate, setSelectedDailyDate] = useState('2026-06-26');
+  const [selectedDailyDate, setSelectedDailyDate] = useState(() => getLocalDateKey());
 
   useEffect(() => {
     if (!selectedMonth) return;
@@ -199,7 +194,7 @@ const HrmsAdminScreen = () => {
       return;
     }
 
-    const monthLabel = MONTHS_LIST.find(m => m.key === selectedMonth)?.label || selectedMonth;
+    const monthLabel = monthsList.find(m => m.key === selectedMonth)?.label || selectedMonth;
 
     Alert.alert(
       'Export Attendance',
@@ -245,7 +240,7 @@ const HrmsAdminScreen = () => {
     <View style={styles.selectorBar}>
       <View style={styles.monthSelector}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.monthsScroll}>
-          {MONTHS_LIST.map(m => (
+          {monthsList.map(m => (
             <TouchableOpacity
               key={m.key}
               style={[styles.monthTab, selectedMonth === m.key && styles.monthTabActive]}
@@ -342,7 +337,7 @@ const HrmsAdminScreen = () => {
                   {/* Days columns */}
                   {datesList.map(dateKey => {
                     const statusObj = item.dayWise[dateKey];
-                    const letterConfig = STATUS_LETTERS[statusObj?.status] || { letter: '-', color: '#444' };
+                    const letterConfig = getHrmsStatusDisplay(statusObj?.status);
                     const isFuture = statusObj?.status === 'Future' || statusObj?.status === 'No Record';
 
                     return (
@@ -374,28 +369,16 @@ const HrmsAdminScreen = () => {
           </View>
         </ScrollView>
         {/* Legend row */}
-        <View style={styles.legend}>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: GREEN }]} />
-            <Text style={styles.legendText}>Full Day (≥8h)</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#D35400' }]} />
-            <Text style={styles.legendText}>Short Leave (≥6h)</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: YELLOW }]} />
-            <Text style={styles.legendText}>Half Day (≥4.5h)</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: '#1ABC9C' }]} />
-            <Text style={styles.legendText}>Present ({"<"}4.5h)</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: RED }]} />
-            <Text style={styles.legendText}>Absent (0h)</Text>
-          </View>
-        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.legend}>
+          {Object.values(HRMS_STATUS_DISPLAY)
+            .filter(item => item.letter !== '-')
+            .map(item => (
+              <View key={item.label} style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+                <Text style={styles.legendText}>{item.label}</Text>
+              </View>
+            ))}
+        </ScrollView>
       </View>
     );
   };
@@ -475,7 +458,7 @@ const HrmsAdminScreen = () => {
   const renderDayCellModal = () => {
     if (!selectedDayCellInfo) return null;
     const { employee, dateKey, dayInfo } = selectedDayCellInfo;
-    const statusConfig = STATUS_LETTERS[dayInfo.status] || { letter: '-', color: '#8B949E' };
+    const statusConfig = getHrmsStatusDisplay(dayInfo.status);
 
     const dateObj = new Date(dateKey);
     const displayDate = dateObj.toLocaleDateString('en-IN', {
@@ -646,6 +629,34 @@ const HrmsAdminScreen = () => {
                 <Text style={[styles.dayCellInfoText, { color: YELLOW }]}>Half Day: worked 4.5h – 6h out of 8h required</Text>
               </View>
             )}
+            {(dayInfo.status === 'Leave' || dayInfo.status === 'Paid Leave') && (
+              <View style={[styles.dayCellInfoBanner, { borderColor: BLUE, backgroundColor: 'rgba(52,152,219,0.08)' }]}>
+                <Icon name="calendar" size={wp(4)} color={BLUE} />
+                <Text style={[styles.dayCellInfoText, { color: BLUE }]}>
+                  {dayInfo.status === 'Paid Leave'
+                    ? 'Approved leave within quarterly paid quota (salary counted)'
+                    : 'Approved leave day'}
+                </Text>
+              </View>
+            )}
+            {dayInfo.status === 'Unpaid Leave' && (
+              <View style={[styles.dayCellInfoBanner, { borderColor: RED, backgroundColor: 'rgba(248,81,73,0.08)' }]}>
+                <Icon name="alert-triangle" size={wp(4)} color={RED} />
+                <Text style={[styles.dayCellInfoText, { color: RED }]}>Leave exceeds quarterly paid quota — salary deduction applies</Text>
+              </View>
+            )}
+            {dayInfo.status === 'Sandwich Leave' && (
+              <View style={[styles.dayCellInfoBanner, { borderColor: '#E85D5D', backgroundColor: 'rgba(232,93,93,0.08)' }]}>
+                <Icon name="alert-circle" size={wp(4)} color="#E85D5D" />
+                <Text style={[styles.dayCellInfoText, { color: '#E85D5D' }]}>Weekly off sandwiched between leave/absent days — counted as leave</Text>
+              </View>
+            )}
+            {dayInfo.status === 'Weekly Off' && (
+              <View style={[styles.dayCellInfoBanner, { borderColor: '#555555', backgroundColor: 'rgba(85,85,85,0.12)' }]}>
+                <Icon name="moon" size={wp(4)} color="#8B949E" />
+                <Text style={[styles.dayCellInfoText, { color: '#8B949E' }]}>Weekly off (Saturday / Sunday)</Text>
+              </View>
+            )}
 
             {/* Close Button */}
             <TouchableOpacity
@@ -801,6 +812,7 @@ const HrmsAdminScreen = () => {
     const { employee, summary, dayWise } = selectedEmployeeDetail;
     const baseSalary = employee.base_salary || 0;
     const daysInMonth = Object.keys(dayWise).length;
+    const totalLeaveCount = (summary.paidLeave ?? summary.leave ?? 0) + (summary.unpaidLeave || 0);
     const salaryResults = calculateSalaryProjection(baseSalary, summary, daysInMonth);
 
     // Sum of total work hours in this month
@@ -833,7 +845,7 @@ const HrmsAdminScreen = () => {
                   <Text style={styles.modalStatLabel}>Work Hours</Text>
                 </View>
                 <View style={styles.modalStatCard}>
-                  <Text style={[styles.modalStatVal, { color: BLUE }]}>{summary.leave}d</Text>
+                  <Text style={[styles.modalStatVal, { color: BLUE }]}>{totalLeaveCount}d</Text>
                   <Text style={styles.modalStatLabel}>Leaves</Text>
                 </View>
                 <View style={styles.modalStatCard}>
@@ -860,7 +872,7 @@ const HrmsAdminScreen = () => {
                   </View>
                   <View style={styles.breakdownRow}>
                     <Text style={styles.breakdownLabel}>Approved Leaves</Text>
-                    <Text style={[styles.breakdownVal, { color: BLUE }]}>{summary.leave}</Text>
+                    <Text style={[styles.breakdownVal, { color: BLUE }]}>{summary.paidLeave ?? summary.leave ?? 0}</Text>
                   </View>
                   <View style={styles.breakdownRow}>
                     <Text style={styles.breakdownLabel}>Weekly Off / Off Days</Text>
@@ -907,7 +919,7 @@ const HrmsAdminScreen = () => {
                     const isFuture = dayInfo.status === 'Future';
                     if (isFuture) return null;
 
-                    const letterConfig = STATUS_LETTERS[dayInfo.status] || { letter: '-', color: '#444' };
+                    const letterConfig = getHrmsStatusDisplay(dayInfo.status);
 
                     return (
                       <View key={dateKey} style={styles.logRow}>
@@ -1060,7 +1072,7 @@ const HrmsAdminScreen = () => {
             contentContainerStyle={styles.dailyList}
             renderItem={({ item }) => {
               const dayInfo = item.dayWise[selectedDailyDate] || { status: 'Absent', hours: 0, clockIn: null, clockOut: null };
-              const statusColor = STATUS_LETTERS[dayInfo.status]?.color || '#8B949E';
+              const statusColor = getHrmsStatusDisplay(dayInfo.status).color;
               const showTimes = dayInfo.status === 'Present' || dayInfo.status === 'Half Day' || (dayInfo.status === 'Absent' && dayInfo.hours > 0);
 
               return (

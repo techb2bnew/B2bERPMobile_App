@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import Icon from 'react-native-vector-icons/Feather';
@@ -23,6 +24,8 @@ import {
   TASK_ASSIGNEES_LABEL,
   TASK_ASSIGNEE_REQUIRED,
   TASK_CANCEL_BUTTON,
+  TASK_DATE_LABEL,
+  TASK_DUE_DATE_BEFORE_TASK_DATE,
   TASK_DUE_DATE_LABEL,
   TASK_EDIT_TASK_TITLE,
   TASK_ESTIMATED_HOURS_LABEL,
@@ -34,6 +37,7 @@ import {
   TASK_SAVE_TASK_BUTTON,
   TASK_SELECT_ASSIGNEES_PLACEHOLDER,
   TASK_SELECT_DUE_DATE,
+  TASK_SELECT_TASK_DATE,
   TASK_STATUS_LABEL,
   TASK_STATUS_READY_FOR_TESTING,
   TASK_STATUS_REVIEW,
@@ -53,7 +57,7 @@ import {
 } from '../../constants/Color';
 import { style } from '../../constants/Fonts';
 import { getLocalDateKey } from '../../services/clockSessionsService';
-import { formatTaskDate, normalizeAssigneeIds, parseDueDateToKey } from '../../utils/projectUtils';
+import { formatTaskDate, normalizeAssigneeIds, normalizeTaskDateKey } from '../../utils/projectUtils';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const PURPLE = '#9B59B6';
@@ -93,8 +97,9 @@ const TaskDetailModal = ({
   const [priority, setPriority] = useState('medium');
   const [assignee, setAssignee] = useState('');
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState([]);
+  const [taskDateKey, setTaskDateKey] = useState('');
   const [dueDateKey, setDueDateKey] = useState('');
-  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [calendarTarget, setCalendarTarget] = useState(null);
   const [estimatedHours, setEstimatedHours] = useState('');
   const [saving, setSaving] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
@@ -179,19 +184,25 @@ const TaskDetailModal = ({
     [dueDateKey],
   );
 
+  const taskDateLabel = useMemo(
+    () => (taskDateKey ? formatTaskDate(taskDateKey) : ''),
+    [taskDateKey],
+  );
+
   const calendarMarkedDates = useMemo(() => {
-    if (!dueDateKey) {
+    const activeKey = calendarTarget === 'task' ? taskDateKey : dueDateKey;
+    if (!activeKey) {
       return {};
     }
 
     return {
-      [dueDateKey]: {
+      [activeKey]: {
         selected: true,
         selectedColor: PURPLE,
         selectedTextColor: '#ffffff',
       },
     };
-  }, [dueDateKey]);
+  }, [calendarTarget, dueDateKey, taskDateKey]);
 
   const calendarTheme = {
     backgroundColor: darkSurfaceColor,
@@ -209,6 +220,7 @@ const TaskDetailModal = ({
   useEffect(() => {
     if (!visible) {
       setErrorMsg('');
+      setCalendarTarget(null);
       return;
     }
     setErrorMsg('');
@@ -224,7 +236,8 @@ const TaskDetailModal = ({
         setSelectedAssigneeIds(currentUserId ? [currentUserId] : []);
         setAssignee(currentUserName || task?.assignee || '');
       }
-      setDueDateKey(getLocalDateKey());
+      setTaskDateKey(getLocalDateKey());
+      setDueDateKey('');
       setEstimatedHours('');
       return;
     }
@@ -238,7 +251,12 @@ const TaskDetailModal = ({
     const taskAssigneeIds = normalizeAssigneeIds(task.assigneeIds, task.assigneeId);
     setSelectedAssigneeIds(taskAssigneeIds);
     setAssignee(task.assignee || '');
-    setDueDateKey(parseDueDateToKey(task.dueDate) || getLocalDateKey());
+    const resolvedTaskDateKey =
+      normalizeTaskDateKey(task.taskDate) ||
+      normalizeTaskDateKey(task.createdDate) ||
+      getLocalDateKey();
+    setTaskDateKey(resolvedTaskDateKey);
+    setDueDateKey(normalizeTaskDateKey(task.dueDate) || '');
     setEstimatedHours(task.estimatedHours || '');
   }, [
     visible,
@@ -277,6 +295,16 @@ const TaskDetailModal = ({
       return;
     }
 
+    if (!taskDateKey) {
+      setErrorMsg('Please select a task date (*).');
+      return;
+    }
+
+    if (dueDateKey && dueDateKey < taskDateKey) {
+      setErrorMsg(TASK_DUE_DATE_BEFORE_TASK_DATE);
+      return;
+    }
+
     const payload = {
       ...(task || {}),
       title: title.trim(),
@@ -286,6 +314,7 @@ const TaskDetailModal = ({
       assignee: selectedAssigneeLabel.trim(),
       assigneeId: resolvedAssigneeIds[0] || '',
       assigneeIds: resolvedAssigneeIds,
+      taskDate: taskDateKey,
       dueDate: dueDateKey,
       estimatedHours: estimatedHours.trim(),
       hoursWorked: estimatedHours.trim()
@@ -320,7 +349,7 @@ const TaskDetailModal = ({
   return (
     <Modal visible={visible} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.overlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlay}>
           <TouchableWithoutFeedback onPress={() => {}}>
             <View style={styles.card}>
               <Text style={styles.title}>{isCreate ? TASK_NEW_TASK_TITLE : TASK_EDIT_TASK_TITLE}</Text>
@@ -401,10 +430,29 @@ const TaskDetailModal = ({
 
                 <View style={styles.row}>
                   <View style={styles.halfField}>
+                    <Text style={styles.label}>{TASK_DATE_LABEL} *</Text>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => setCalendarTarget('task')}>
+                      <View style={styles.dateWrap} pointerEvents="none">
+                        <TextInput
+                          style={[styles.input, styles.dateInput]}
+                          value={taskDateLabel}
+                          editable={false}
+                          placeholder="Select date"
+                          placeholderTextColor={darkPlaceholderColor}
+                        />
+                        <View style={styles.calendarIcon}>
+                          <Icon name="calendar" size={wp(4.5)} color={PURPLE} />
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.halfField}>
                     <Text style={styles.label}>{TASK_DUE_DATE_LABEL}</Text>
                     <TouchableOpacity
                       activeOpacity={0.85}
-                      onPress={() => setCalendarVisible(true)}>
+                      onPress={() => setCalendarTarget('due')}>
                       <View style={styles.dateWrap} pointerEvents="none">
                         <TextInput
                           style={[styles.input, styles.dateInput]}
@@ -420,6 +468,9 @@ const TaskDetailModal = ({
                     </TouchableOpacity>
                   </View>
                 </View>
+                {errorMsg === TASK_DUE_DATE_BEFORE_TASK_DATE ? (
+                  <Text style={styles.errorText}>{errorMsg}</Text>
+                ) : null}
 
                 <View ref={hoursFieldRef} collapsable={false}>
                   <Text style={styles.label}>{TASK_ESTIMATED_HOURS_LABEL}</Text>
@@ -468,33 +519,42 @@ const TaskDetailModal = ({
               </View>
             </View>
           </TouchableWithoutFeedback>
-        </View>
+        </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
       <Modal
-        visible={calendarVisible}
+        visible={Boolean(calendarTarget)}
         transparent
         animationType="fade"
-        onRequestClose={() => setCalendarVisible(false)}>
+        onRequestClose={() => setCalendarTarget(null)}>
         <TouchableOpacity
           activeOpacity={1}
           style={styles.calendarOverlay}
-          onPress={() => setCalendarVisible(false)}>
+          onPress={() => setCalendarTarget(null)}>
           <TouchableOpacity activeOpacity={1} style={styles.calendarCard} onPress={() => {}}>
             <View style={styles.calendarHeader}>
-              <Text style={styles.calendarTitle}>{TASK_SELECT_DUE_DATE}</Text>
+              <Text style={styles.calendarTitle}>
+                {calendarTarget === 'task' ? TASK_SELECT_TASK_DATE : TASK_SELECT_DUE_DATE}
+              </Text>
               <TouchableOpacity
-                onPress={() => setCalendarVisible(false)}
+                onPress={() => setCalendarTarget(null)}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Icon name="x" size={wp(5)} color={darkTextSecondaryColor} />
               </TouchableOpacity>
             </View>
 
             <Calendar
-              current={dueDateKey || getLocalDateKey()}
+              current={
+                (calendarTarget === 'task' ? taskDateKey : dueDateKey) || getLocalDateKey()
+              }
+              minDate={calendarTarget === 'due' ? taskDateKey || undefined : undefined}
               markedDates={calendarMarkedDates}
               onDayPress={day => {
-                setDueDateKey(day.dateString);
-                setCalendarVisible(false);
+                if (calendarTarget === 'task') {
+                  setTaskDateKey(day.dateString);
+                } else {
+                  setDueDateKey(day.dateString);
+                }
+                setCalendarTarget(null);
               }}
               enableSwipeMonths
               theme={calendarTheme}

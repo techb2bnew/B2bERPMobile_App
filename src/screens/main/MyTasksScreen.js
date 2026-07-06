@@ -47,7 +47,7 @@ import {
   fetchAllProjects,
   fetchProjectsWhereUserIsOnTeam,
 } from '../../services/projectsService';
-import { buildEmployeeNameMap } from '../../utils/projectUtils';
+import { buildEmployeeNameMap, formatTaskDate } from '../../utils/projectUtils';
 import { heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const PURPLE = '#9B59B6';
@@ -237,10 +237,16 @@ const MyTasksScreen = () => {
                       <Icon name="flag" size={wp(3.8)} color={darkTextSecondaryColor} />
                       <Text style={styles.metaText}>{task.priority}</Text>
                     </View>
-                    {task.dueDate ? (
+                    {task.taskDate ? (
                       <View style={styles.metaItem}>
                         <Icon name="calendar" size={wp(3.8)} color={darkTextSecondaryColor} />
-                        <Text style={styles.metaText}>{task.dueDate}</Text>
+                        <Text style={styles.metaText}>{formatTaskDate(task.taskDate)}</Text>
+                      </View>
+                    ) : null}
+                    {task.dueDate ? (
+                      <View style={styles.metaItem}>
+                        <Icon name="clock" size={wp(3.8)} color={darkTextSecondaryColor} />
+                        <Text style={styles.metaText}>{formatTaskDate(task.dueDate)}</Text>
                       </View>
                     ) : null}
                   </View>

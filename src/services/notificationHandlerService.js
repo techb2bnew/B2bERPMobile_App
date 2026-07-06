@@ -18,7 +18,7 @@ export const handleNotificationClick = async remoteMessage => {
   }
 
   const data = remoteMessage.data || {};
-  const channelId = data?.channelId || data?.channel_id;
+  const channelId = data?.channelId || data?.channel_id || data?.reference_id || data?.referenceId;
   const type = data?.type;
 
   if (['leave_request', 'leave_status'].includes(type)) {
@@ -26,25 +26,41 @@ export const handleNotificationClick = async remoteMessage => {
     return;
   }
 
-  const session = await getUserSession().catch(() => null);
+  const isChatNotification = type === 'chat_message' || type === 'chat_reaction' || !!channelId;
 
-  if (channelId && session?.id) {
-    const senderId = data?.senderId || data?.sender_id;
+  if (isChatNotification) {
+    const session = await getUserSession().catch(() => null);
+    
+    let safeChannelId = channelId;
+    if (safeChannelId === 'undefined' || safeChannelId === 'null') {
+      safeChannelId = null;
+    }
+    
+    let senderId = data?.senderId || data?.sender_id;
+    if (senderId === 'undefined' || senderId === 'null') {
+      senderId = null;
+    }
+
     const title = remoteMessage.notification?.title || '';
     let chatName = data?.senderName || data?.sender_name || 'Chat';
     if (title.startsWith('New Message from ')) {
       chatName = title.replace('New Message from ', '');
     }
 
-    markChannelNotificationsAsRead({ channelId, userId: session.id })
-      .then(() => syncAppIconBadge(session.id))
-      .catch(() => {});
+    if (session?.id && safeChannelId) {
+      markChannelNotificationsAsRead({ channelId: safeChannelId, userId: session.id })
+        .then(() => syncAppIconBadge(session.id))
+        .catch(() => {});
+    }
 
-    navigate(MAIN_ROUTES.CHANNEL_CHAT, {
-      chatType: senderId ? 'direct' : 'group',
-      channelId: channelId,
-      chatName: chatName,
-      peerId: senderId,
+    navigate(MAIN_ROUTES.CHAT, {
+      autoOpenChat: {
+        chatType: senderId ? 'direct' : 'group',
+        channelId: safeChannelId,
+        chatId: safeChannelId,
+        chatName: chatName,
+        peerId: senderId,
+      }
     });
     return;
   }

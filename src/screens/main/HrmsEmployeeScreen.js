@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -9,7 +9,15 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
-import { fetchEmployeeHrmsData, getDaysInMonth, calculateSalaryProjection } from '../../services/hrmsService';
+import {
+  fetchEmployeeHrmsData,
+  getDaysInMonth,
+  calculateSalaryProjection,
+  getCurrentHrmsMonthKey,
+  getRecentHrmsMonths,
+  getHrmsStatusDisplay,
+} from '../../services/hrmsService';
+import { getLocalDateKey } from '../../services/clockSessionsService';
 import {
   darkBackgroundColor,
   darkBorderColor,
@@ -28,27 +36,12 @@ const GREEN = '#3DDC84';
 const YELLOW = '#F39C12';
 const BLUE = '#3498DB';
 
-const STATUS_COLORS = {
-  'Full Day': GREEN,
-  'Short Leave': '#D35400',
-  'Half Day': YELLOW,
-  'Present': '#1ABC9C',
-  'Absent': RED,
-  'Leave': BLUE,
-  'Weekly Off': '#555555',
-};
-
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-const MONTHS_LIST = [
-  { key: '2026-06', label: 'June 2026' },
-  { key: '2026-05', label: 'May 2026' },
-  { key: '2026-04', label: 'April 2026' },
-];
 
 const HrmsEmployeeScreen = ({ userId }) => {
   const navigation = useNavigation();
-  const [selectedMonth, setSelectedMonth] = useState('2026-06');
+  const monthsList = useMemo(() => getRecentHrmsMonths(4), []);
+  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentHrmsMonthKey());
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [selectedDayDetail, setSelectedDayDetail] = useState(null);
@@ -60,7 +53,7 @@ const HrmsEmployeeScreen = ({ userId }) => {
       setData(res);
       
       // Auto select today or first day
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalDateKey();
       if (res?.dayWise[todayStr]) {
         setSelectedDayDetail({ dateKey: todayStr, ...res.dayWise[todayStr] });
       } else {
@@ -112,16 +105,16 @@ const HrmsEmployeeScreen = ({ userId }) => {
   };
 
   const handlePrevMonth = () => {
-    const idx = MONTHS_LIST.findIndex(m => m.key === selectedMonth);
-    if (idx < MONTHS_LIST.length - 1) {
-      setSelectedMonth(MONTHS_LIST[idx + 1].key);
+    const idx = monthsList.findIndex(m => m.key === selectedMonth);
+    if (idx < monthsList.length - 1) {
+      setSelectedMonth(monthsList[idx + 1].key);
     }
   };
 
   const handleNextMonth = () => {
-    const idx = MONTHS_LIST.findIndex(m => m.key === selectedMonth);
+    const idx = monthsList.findIndex(m => m.key === selectedMonth);
     if (idx > 0) {
-      setSelectedMonth(MONTHS_LIST[idx - 1].key);
+      setSelectedMonth(monthsList[idx - 1].key);
     }
   };
 
@@ -136,6 +129,7 @@ const HrmsEmployeeScreen = ({ userId }) => {
 
   const { summary, employee } = data;
   const baseSalary = employee?.base_salary || 0;
+  const totalLeaveCount = (summary.paidLeave ?? summary.leave ?? 0) + (summary.unpaidLeave || 0);
   
   // Salary math via central engine
   const daysInMonth = Object.keys(data.dayWise).length;
@@ -154,14 +148,14 @@ const HrmsEmployeeScreen = ({ userId }) => {
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       {/* Month Selection Bar */}
       <View style={styles.monthSelector}>
-        <TouchableOpacity style={styles.monthNavBtn} onPress={handlePrevMonth} disabled={selectedMonth === MONTHS_LIST[MONTHS_LIST.length - 1].key}>
-          <Icon name="chevron-left" size={wp(6)} color={selectedMonth === MONTHS_LIST[MONTHS_LIST.length - 1].key ? '#444' : '#fff'} />
+        <TouchableOpacity style={styles.monthNavBtn} onPress={handlePrevMonth} disabled={selectedMonth === monthsList[monthsList.length - 1]?.key}>
+          <Icon name="chevron-left" size={wp(6)} color={selectedMonth === monthsList[monthsList.length - 1]?.key ? '#444' : '#fff'} />
         </TouchableOpacity>
         <Text style={styles.monthLabel}>
-          {MONTHS_LIST.find(m => m.key === selectedMonth)?.label || selectedMonth}
+          {monthsList.find(m => m.key === selectedMonth)?.label || selectedMonth}
         </Text>
-        <TouchableOpacity style={styles.monthNavBtn} onPress={handleNextMonth} disabled={selectedMonth === MONTHS_LIST[0].key}>
-          <Icon name="chevron-right" size={wp(6)} color={selectedMonth === MONTHS_LIST[0].key ? '#444' : '#fff'} />
+        <TouchableOpacity style={styles.monthNavBtn} onPress={handleNextMonth} disabled={selectedMonth === monthsList[0]?.key}>
+          <Icon name="chevron-right" size={wp(6)} color={selectedMonth === monthsList[0]?.key ? '#444' : '#fff'} />
         </TouchableOpacity>
       </View>
 
@@ -180,7 +174,7 @@ const HrmsEmployeeScreen = ({ userId }) => {
           <Text style={styles.statLabel}>Absent</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={[styles.statVal, { color: BLUE }]}>{summary.leave}</Text>
+          <Text style={[styles.statVal, { color: BLUE }]}>{totalLeaveCount}</Text>
           <Text style={styles.statLabel}>Leaves</Text>
         </View>
       </View>
@@ -206,7 +200,7 @@ const HrmsEmployeeScreen = ({ userId }) => {
                 }
 
                 const dayData = data.dayWise[cell.dateKey];
-                const dotColor = STATUS_COLORS[dayData?.status] || '#555';
+                const dotColor = getHrmsStatusDisplay(dayData?.status).color;
                 const isSelected = selectedDayDetail?.dateKey === cell.dateKey;
 
                 return (
@@ -237,8 +231,8 @@ const HrmsEmployeeScreen = ({ userId }) => {
         <View style={styles.card}>
           <View style={styles.detailHeader}>
             <Text style={styles.detailDateText}>{selectedDateLabel}</Text>
-            <View style={[styles.statusPill, { backgroundColor: `${STATUS_COLORS[selectedDayDetail.status] || '#8B949E'}20` }]}>
-              <Text style={[styles.statusPillText, { color: STATUS_COLORS[selectedDayDetail.status] || '#8B949E' }]}>
+            <View style={[styles.statusPill, { backgroundColor: `${getHrmsStatusDisplay(selectedDayDetail.status).color}20` }]}>
+              <Text style={[styles.statusPillText, { color: getHrmsStatusDisplay(selectedDayDetail.status).color }]}>
                 {selectedDayDetail.status}
               </Text>
             </View>
@@ -303,10 +297,32 @@ const HrmsEmployeeScreen = ({ userId }) => {
                 <Text style={{ color: darkTextSecondaryColor }}> / 8h</Text>
               </Text>
             </View>
-            {selectedDayDetail.status === 'Leave' && (
+            {(selectedDayDetail.status === 'Leave' || selectedDayDetail.status === 'Paid Leave') && (
               <View style={styles.detailRow}>
                 <Icon name="info" size={wp(4.5)} color={BLUE} />
-                <Text style={[styles.detailText, { color: BLUE }]}>Approved Leave Day</Text>
+                <Text style={[styles.detailText, { color: BLUE }]}>
+                  {selectedDayDetail.status === 'Paid Leave'
+                    ? 'Approved paid leave (within quarterly quota)'
+                    : 'Approved leave day'}
+                </Text>
+              </View>
+            )}
+            {selectedDayDetail.status === 'Unpaid Leave' && (
+              <View style={styles.detailRow}>
+                <Icon name="alert-triangle" size={wp(4.5)} color={RED} />
+                <Text style={[styles.detailText, { color: RED }]}>Unpaid leave — quarterly quota exceeded</Text>
+              </View>
+            )}
+            {selectedDayDetail.status === 'Sandwich Leave' && (
+              <View style={styles.detailRow}>
+                <Icon name="alert-circle" size={wp(4.5)} color="#E85D5D" />
+                <Text style={[styles.detailText, { color: '#E85D5D' }]}>Sandwich leave — weekly off between leave days</Text>
+              </View>
+            )}
+            {selectedDayDetail.status === 'Weekly Off' && (
+              <View style={styles.detailRow}>
+                <Icon name="moon" size={wp(4.5)} color="#8B949E" />
+                <Text style={[styles.detailText, { color: '#8B949E' }]}>Weekly off (Saturday / Sunday)</Text>
               </View>
             )}
             {selectedDayDetail.status === 'Short Leave' && (

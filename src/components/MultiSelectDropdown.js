@@ -8,6 +8,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import {
@@ -125,7 +127,9 @@ const MultiSelectDropdown = ({
         animationType="slide"
         statusBarTranslucent
         onRequestClose={closeMenu}>
-        <View style={styles.sheetRoot}>
+        <KeyboardAvoidingView 
+          style={styles.sheetRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <Pressable style={styles.sheetBackdrop} onPress={closeMenu} />
 
           <View style={styles.sheet}>
@@ -211,7 +215,7 @@ const MultiSelectDropdown = ({
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -391,6 +395,7 @@ const styles = StyleSheet.create({
     borderColor: darkBorderColor,
     paddingHorizontal: wp(3),
     marginBottom: hp(1.2),
+    height:hp(5)
   },
   searchIcon: {
     marginRight: wp(2),
@@ -399,7 +404,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: darkTextPrimaryColor,
     fontSize: style.fontSizeNormal.fontSize,
-    padding: spacings.normal,
+    padding: spacings.large,
   },
   noResultsText: {
     ...style.fontSizeNormal,

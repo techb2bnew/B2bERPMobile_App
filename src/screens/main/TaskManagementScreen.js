@@ -58,7 +58,7 @@ import { fetchAllEmployeeProfiles } from '../../services/employeeService';
 import { fetchAllProjects } from '../../services/projectsService';
 import { syncSupabaseRealtimeAuth } from '../../lib/supabase';
 import { isEmployeeUser, isTeamLeaderUser } from '../../constants/roles';
-import { buildEmployeeNameMap, buildInProgressConflictMessage, normalizeAssigneeIds, rowAssignedToUserId } from '../../utils/projectUtils';
+import { buildEmployeeNameMap, buildInProgressConflictMessage, formatTaskDate, normalizeAssigneeIds, rowAssignedToUserId } from '../../utils/projectUtils';
 import { getFirstName, heightPercentageToDP as hp, widthPercentageToDP as wp } from '../../utils';
 
 const TASKS_POLL_INTERVAL_MS = 5000;
@@ -733,6 +733,16 @@ const TaskManagementScreen = () => {
         </Text>
         <Text style={styles.projectTag}>{task.project}</Text>
         <Text style={styles.hoursWorked}>{task.hoursWorked}</Text>
+        {task.taskDate || task.dueDate ? (
+          <Text style={styles.dateMeta} numberOfLines={2}>
+            {[
+              task.taskDate ? `Task: ${formatTaskDate(task.taskDate)}` : null,
+              task.dueDate ? `Due: ${formatTaskDate(task.dueDate)}` : null,
+            ]
+              .filter(Boolean)
+              .join('   ·   ')}
+          </Text>
+        ) : null}
         <View style={styles.taskFooter}>
           <View style={styles.assigneeRow}>
             <View style={styles.assigneeAvatar}>
@@ -741,10 +751,6 @@ const TaskManagementScreen = () => {
               </Text>
             </View>
             <Text style={styles.assigneeName}>{task.assignee}</Text>
-          </View>
-          <View style={styles.dueRow}>
-            <Icon name="clock" size={wp(3.5)} color={darkTextSecondaryColor} />
-            <Text style={styles.dueDate}>{task.dueDate}</Text>
           </View>
         </View>
         {isDragging ? (
@@ -1183,12 +1189,17 @@ const styles = StyleSheet.create({
   hoursWorked: {
     ...style.fontSizeSmall,
     color: darkAccentGreenColor,
+    marginBottom: hp(0.4),
+  },
+  dateMeta: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
     marginBottom: hp(1),
   },
   taskFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
   },
   assigneeRow: {
     flexDirection: 'row',
@@ -1217,15 +1228,6 @@ const styles = StyleSheet.create({
     ...style.fontWeightMedium,
     color: ORANGE,
     marginBottom: hp(0.8),
-  },
-  dueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: wp(1),
-  },
-  dueDate: {
-    ...style.fontSizeSmall,
-    color: darkTextSecondaryColor,
   },
   addCardButton: {
     flexDirection: 'row',

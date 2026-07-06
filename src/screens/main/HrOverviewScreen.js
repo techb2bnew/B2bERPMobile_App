@@ -10,12 +10,14 @@ import {
   TouchableOpacity,
   View,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import AppHeader from '../../components/AppHeader';
 import UserAvatar from '../../components/UserAvatar';
-import { fetchAllEmployeeProfiles, updateEmployeeProfile } from '../../services/employeeService';
+import { fetchAllEmployeeProfiles, updateEmployeeProfile, getEmployeeProfileImageUrl } from '../../services/employeeService';
 import { fetchActiveEmployeeStatuses } from '../../services/clockSessionsService';
 import { normalizeDepartmentName } from '../../services/hrmsService';
 import {
@@ -43,7 +45,7 @@ const HrOverviewScreen = () => {
   const [viewingEmployee, setViewingEmployee] = useState(null);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [editForm, setEditForm] = useState({ 
-    name: '', role: '', dept: '', email: '', phone: '', employee_id: '' 
+    name: '', role: '', dept: '', email: '', phone: '', employee_id: '', salary: '' 
   });
   const [saving, setSaving] = useState(false);
 
@@ -82,12 +84,13 @@ const HrOverviewScreen = () => {
       email: employee.email || '',
       phone: employee.phone || '',
       employee_id: employee.employee_id || '',
+      salary: employee.salary ? String(employee.salary).replace(/[^0-9]/g, '') : '',
     });
   };
 
   const closeEditModal = () => {
     setEditingEmployee(null);
-    setEditForm({ name: '', role: '', dept: '', email: '', phone: '', employee_id: '' });
+    setEditForm({ name: '', role: '', dept: '', email: '', phone: '', employee_id: '', salary: '' });
   };
 
   const saveEmployeeDetails = async () => {
@@ -104,6 +107,7 @@ const HrOverviewScreen = () => {
         dept: editForm.dept.trim(),
         email: editForm.email.trim(),
         phone: editForm.phone.trim(),
+        salary: editForm.salary.trim() ? `₹${editForm.salary.trim()}` : null,
       };
       
       await updateEmployeeProfile(editingEmployee.id, updateData);
@@ -148,7 +152,7 @@ const HrOverviewScreen = () => {
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <UserAvatar userId={item.id} name={item.name} imageUrl={item.profile_image_url || item.avatar} size={wp(12)} />
+          <UserAvatar userId={item.id} name={item.name} imageUrl={getEmployeeProfileImageUrl(item)} size={wp(12)} />
           <View style={styles.cardInfo}>
             <Text style={styles.employeeName}>{capitalizeName(item.name || 'User')}</Text>
             <Text style={styles.employeeRole}>{item.role || 'Employee'}</Text>
@@ -228,7 +232,7 @@ const HrOverviewScreen = () => {
         animationType="fade"
         onRequestClose={closeEditModal}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Edit Profile</Text>
@@ -296,6 +300,18 @@ const HrOverviewScreen = () => {
                   maxLength={10}
                 />
               </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Base Monthly Salary (₹)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={editForm.salary}
+                  onChangeText={(text) => setEditForm(prev => ({ ...prev, salary: text.replace(/[^0-9]/g, '') }))}
+                  placeholder="Enter base salary (e.g. 30000)"
+                  placeholderTextColor={darkTextSecondaryColor}
+                  keyboardType="numeric"
+                />
+              </View>
             </ScrollView>
             
             <View style={styles.modalActions}>
@@ -311,7 +327,7 @@ const HrOverviewScreen = () => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* View Profile Modal */}
@@ -336,7 +352,7 @@ const HrOverviewScreen = () => {
                   <UserAvatar 
                     userId={viewingEmployee.id} 
                     name={viewingEmployee.name} 
-                    imageUrl={viewingEmployee.profile_image_url || viewingEmployee.avatar} 
+                    imageUrl={getEmployeeProfileImageUrl(viewingEmployee)} 
                     size={wp(24)} 
                   />
                   <Text style={styles.viewProfileName}>{capitalizeName(viewingEmployee.name || 'User')}</Text>
@@ -382,6 +398,18 @@ const HrOverviewScreen = () => {
                       <Text style={styles.detailLabel}>App Role</Text>
                       <Text style={styles.detailValue}>
                         {viewingEmployee.app_role ? capitalizeName(viewingEmployee.app_role.replace('_', ' ')) : 'Not available'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailIconBox}>
+                      <Icon name="dollar-sign" size={wp(4.5)} color={PURPLE} />
+                    </View>
+                    <View style={styles.detailInfo}>
+                      <Text style={styles.detailLabel}>Base Monthly Salary</Text>
+                      <Text style={styles.detailValue}>
+                        {viewingEmployee.salary || 'Not set'}
                       </Text>
                     </View>
                   </View>

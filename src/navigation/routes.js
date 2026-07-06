@@ -22,4 +22,5 @@ export const MAIN_ROUTES = {
   RECRUITER_DASHBOARD: 'RecruiterDashboard',
   ATS_JOBS: 'AtsJobs',
   ATS_PIPELINE: 'AtsPipeline',
+  PAYROLL_ADMIN: 'PayrollAdmin',
 };

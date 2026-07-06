@@ -199,10 +199,15 @@ export const isHrManagerUser = user => {
   return getLoginCategoryForProfileRole(user?.role) === HR_MANAGER_ROLE_ID;
 };
 
-export const getCabinAlertMessage = user =>
-  isCeoAdminUser(user)
-    ? 'Please come to the CEO cabin.'
-    : 'Please come to the manager cabin.';
+export const getCabinAlertMessage = user => {
+  if (isCeoAdminUser(user)) {
+    return 'Please come to the CEO cabin.';
+  }
+  if (isHrManagerUser(user)) {
+    return 'Please come to the HR cabin.';
+  }
+  return 'Please come to the manager cabin.';
+};
 
 export const COMING_SOON_TITLE = 'Coming Soon';
 export const COMING_SOON_MESSAGE =

@@ -20,6 +20,7 @@ import HrOverviewScreen from '../screens/main/HrOverviewScreen';
 import RecruiterDashboardScreen from '../screens/main/RecruiterDashboardScreen';
 import AtsJobsScreen from '../screens/main/AtsJobsScreen';
 import AtsPipelineScreen from '../screens/main/AtsPipelineScreen';
+import PayrollAdminScreen from '../screens/main/PayrollAdminScreen';
 import { MAIN_ROUTES } from './routes';
 
 const Stack = createNativeStackNavigator();
@@ -115,6 +116,11 @@ const MainStackNavigator = () => {
           name={MAIN_ROUTES.ATS_PIPELINE}
           component={AtsPipelineScreen}
           listeners={focusListener(MAIN_ROUTES.ATS_PIPELINE, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.PAYROLL_ADMIN}
+          component={PayrollAdminScreen}
+          listeners={focusListener(MAIN_ROUTES.PAYROLL_ADMIN, setActiveRoute)}
         />
       </Stack.Navigator>
       <CustomDrawer />

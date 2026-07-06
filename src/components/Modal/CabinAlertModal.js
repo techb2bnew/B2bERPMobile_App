@@ -32,7 +32,7 @@ import {
   darkTextPrimaryColor,
   darkTextSecondaryColor,
 } from '../../constants/Color';
-import { getCabinAlertMessage } from '../../constants/roles';
+import { getCabinAlertMessage, isHrManagerUser, isCeoAdminUser } from '../../constants/roles';
 import { style } from '../../constants/Fonts';
 import { useAuth } from '../../context/AuthContext';
 import { sendCabinAlertsToEmployees } from '../../services/cabinAlertService';
@@ -82,7 +82,7 @@ const CabinAlertModal = ({ visible, onClose }) => {
       try {
         const data = await fetchAllEmployeeProfiles();
         if (!cancelled) {
-          setEmployees(data.filter(employee => !isCurrentUser(employee, user)));
+          setEmployees(data.filter(employee => !isCurrentUser(employee, user) && !isHrManagerUser(employee) && !isCeoAdminUser(employee)));
         }
       } catch (loadError) {
         if (!cancelled) {

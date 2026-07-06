@@ -11,8 +11,9 @@ import {
   formatTaskDate,
   formatTaskEstimateHours,
   getUserId,
-  isCreatedToday,
+  isTaskScheduledToday,
   normalizeAssigneeIds,
+  normalizeTaskDateKey,
   rowAssignedToUserId,
 } from '../utils/projectUtils';
 import { mapAppStatusToDb, mapDbStatusToApp } from './projectsService';
@@ -254,7 +255,8 @@ export const mapProjectTaskRowToApp = (row, projectMeta = {}) => {
     assigneeId: assigneeIds[0] || row.assignee_id || '',
     assigneeIds,
     createdDate: formatTaskDate(row.created_at || row.created_date),
-    dueDate: formatTaskDate(row.due),
+    taskDate: normalizeTaskDateKey(row.task_date),
+    dueDate: normalizeTaskDateKey(row.due),
   };
 };
 
@@ -277,7 +279,8 @@ export const mapAppTaskToProjectTaskRow = (task, { projectId, assigneeId, assign
     work_notes: toWorkNotes(task.description),
     status: mapAppStatusToDb(task.status),
     priority: (task.priority || 'medium').toLowerCase(),
-    due: toNullableText(task.dueDate),
+    task_date: toNullableText(normalizeTaskDateKey(task.taskDate)),
+    due: toNullableText(normalizeTaskDateKey(task.dueDate)),
     est: estimated,
   };
 };
@@ -332,7 +335,8 @@ const buildTaskUpdateRow = (task, { assigneeIds } = {}) => {
     work_notes: toWorkNotes(task.description),
     status: mapAppStatusToDb(task.status),
     priority: (task.priority || 'medium').toLowerCase(),
-    due: toNullableText(task.dueDate),
+    task_date: toNullableText(normalizeTaskDateKey(task.taskDate)),
+    due: toNullableText(normalizeTaskDateKey(task.dueDate)),
     est: estimated,
     updated_at: new Date().toISOString(),
   };
@@ -516,7 +520,7 @@ export const fetchTodayTasksForUser = async (user, projectNameById = {}) => {
 
   return (data || [])
     .filter(row => rowAssignedToUserId(row, assigneeId))
-    .filter(row => isCreatedToday(row.created_at || row.created_date))
+    .filter(row => isTaskScheduledToday(row))
     .map(row =>
       mapProjectTaskRowToApp(row, {
         name: projectNameById[row.project_id] || '',
