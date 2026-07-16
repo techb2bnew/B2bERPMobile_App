@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -54,6 +55,7 @@ import {
   darkSurfaceColor,
   darkTextPrimaryColor,
   darkTextSecondaryColor,
+  whiteColor,
 } from '../../constants/Color';
 import { style, spacings } from '../../constants/Fonts';
 import { MAIN_ROUTES } from '../../navigation/routes';
@@ -85,14 +87,21 @@ const PURPLE = '#9B59B6';
 const CARD_RADIUS = wp(4);
 const HORIZONTAL_PAD = wp(5);
 const CARD_GAP = hp(2);
-const getSegmentColor = (kind) => {
+const SHIFT_START_HOUR = 4; // 04:00 AM
+const SHIFT_END_HOUR = 27; // 03:00 AM next day
+const TOTAL_SHIFT_MS = (SHIFT_END_HOUR - SHIFT_START_HOUR) * 60 * 60 * 1000;
+
+const getSegmentColor = (kind, label = '') => {
+  if (kind === 'meeting' || (kind === 'break' && String(label).toLowerCase().includes('meeting'))) {
+    return '#9B59B6';
+  }
   switch (kind) {
     case 'idle':
-      return '#F85149'; // Red
+      return '#F85149';
     case 'break':
-      return '#F5C542'; // Yellow
+      return '#F5C542';
     case 'working':
-      return '#3498DB'; // Blue
+      return '#3498DB';
     default:
       return '#8B949E';
   }
@@ -115,10 +124,7 @@ const formatTimeOfDay = (timestamp) => {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 };
 
-const renderTimelineBar = (segments) => {
-  const SHIFT_START_HOUR = 10;
-  const SHIFT_END_HOUR = 21;
-  const TOTAL_SHIFT_MS = (SHIFT_END_HOUR - SHIFT_START_HOUR) * 60 * 60 * 1000;
+const renderTimelineBar = (segments, referenceTime = Date.now()) => {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const shiftStart = startOfDay.getTime() + SHIFT_START_HOUR * 60 * 60 * 1000;
@@ -129,21 +135,15 @@ const renderTimelineBar = (segments) => {
 
   return (
     <View style={styles.timelineContainer}>
-      {/* Hour Guide lines (10 AM to 9 PM = 11 intervals) */}
-      <View style={[styles.gridline, { left: '9.09%' }]} />
-      <View style={[styles.gridline, { left: '18.18%' }]} />
-      <View style={[styles.gridline, { left: '27.27%' }]} />
-      <View style={[styles.gridline, { left: '36.36%' }]} />
-      <View style={[styles.gridline, { left: '45.45%' }]} />
-      <View style={[styles.gridline, { left: '54.54%' }]} />
-      <View style={[styles.gridline, { left: '63.63%' }]} />
-      <View style={[styles.gridline, { left: '72.72%' }]} />
-      <View style={[styles.gridline, { left: '81.81%' }]} />
-      <View style={[styles.gridline, { left: '90.90%' }]} />
+      <View style={[styles.gridline, { left: '17.39%' }]} />
+      <View style={[styles.gridline, { left: '34.78%' }]} />
+      <View style={[styles.gridline, { left: '52.17%' }]} />
+      <View style={[styles.gridline, { left: '69.57%' }]} />
+      <View style={[styles.gridline, { left: '86.96%' }]} />
 
-      {segments.map((seg) => {
+      {segments.map((seg, index) => {
         const segStart = new Date(seg.started_at).getTime();
-        const segEnd = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
+        const segEnd = seg.ended_at ? new Date(seg.ended_at).getTime() : referenceTime;
 
         const startOffset = Math.max(0, segStart - shiftStart);
         const endOffset = Math.min(TOTAL_SHIFT_MS, segEnd - shiftStart);
@@ -157,13 +157,13 @@ const renderTimelineBar = (segments) => {
 
         return (
           <View
-            key={seg.id}
+            key={seg.id || `seg-${index}`}
             style={[
               styles.segmentBlock,
               {
                 left: `${leftPercent}%`,
                 width: `${widthPercent}%`,
-                backgroundColor: getSegmentColor(seg.kind),
+                backgroundColor: getSegmentColor(seg.kind, seg.label),
               },
             ]}
           />
@@ -193,6 +193,12 @@ const DashboardScreen = () => {
   const { weeklyData, loading: weeklyLoading } = useWeeklyHours(user?.id);
   const [todayTasks, setTodayTasks] = useState([]);
   const [tasksLoading, setTasksLoading] = useState(true);
+  const [myShiftSession, setMyShiftSession] = useState(null);
+  const [myShiftLoading, setMyShiftLoading] = useState(false);
+  const [timelineTick, setTimelineTick] = useState(0);
+  const [showShiftDetailModal, setShowShiftDetailModal] = useState(false);
+  const [detailTasks, setDetailTasks] = useState([]);
+  const [detailTasksLoading, setDetailTasksLoading] = useState(false);
 
   // CEO and Manager specific states
   const [shiftSessions, setShiftSessions] = useState([]);
@@ -200,6 +206,61 @@ const DashboardScreen = () => {
   const [recentLeaves, setRecentLeaves] = useState([]);
   const [leavesLoading, setLeavesLoading] = useState(false);
   const [totalEmployees, setTotalEmployees] = useState(0);
+
+  const loadMyDailyShift = useCallback(async () => {
+    if (!user?.id || isCeoAdminUser(user)) {
+      setMyShiftSession(null);
+      return;
+    }
+
+    setMyShiftLoading(true);
+    try {
+      if (!isSupabaseConfigured) {
+        setMyShiftSession(null);
+        return;
+      }
+
+      const dateKey = getLocalDateKey(new Date());
+      const startOfDay = `${dateKey}T00:00:00.000Z`;
+      const endOfDay = `${dateKey}T23:59:59.999Z`;
+      const supabase = getSupabase();
+
+      const { data: rawSessions, error: sessionErr } = await supabase
+        .from('clock_sessions')
+        .select('*')
+        .eq('employee_id', user.id)
+        .gte('clock_in', startOfDay)
+        .lte('clock_in', endOfDay)
+        .order('clock_in', { ascending: false })
+        .limit(1);
+
+      if (sessionErr) throw sessionErr;
+
+      const session = rawSessions?.[0] || null;
+      if (!session) {
+        setMyShiftSession(null);
+        return;
+      }
+
+      const { data: rawSegments, error: segmentErr } = await supabase
+        .from('clock_session_segments')
+        .select('*')
+        .eq('session_id', session.id)
+        .order('started_at', { ascending: true });
+
+      if (segmentErr) throw segmentErr;
+
+      setMyShiftSession({
+        ...session,
+        segments: rawSegments || [],
+      });
+    } catch (e) {
+      console.error('Error loading my daily shift:', e);
+      setMyShiftSession(null);
+    } finally {
+      setMyShiftLoading(false);
+    }
+  }, [user]);
 
   const loadTodayTasks = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -392,6 +453,8 @@ const DashboardScreen = () => {
       loadTodayTasks();
       if (isCeoAdminUser(user)) {
         loadDashboardShifts();
+      } else {
+        loadMyDailyShift();
       }
       if (isReviewerUser(user)) {
         loadRecentLeaves();
@@ -401,8 +464,261 @@ const DashboardScreen = () => {
       return () => {
         active = false;
       };
-    }, [loadTodayTasks, loadDashboardShifts, loadRecentLeaves, user]),
+    }, [loadTodayTasks, loadDashboardShifts, loadMyDailyShift, loadRecentLeaves, user]),
   );
+
+  useEffect(() => {
+    if (isCeoAdminUser(user)) {
+      return;
+    }
+    loadMyDailyShift();
+  }, [isClockedIn, isPaused, loadMyDailyShift, user]);
+
+  useEffect(() => {
+    if (isCeoAdminUser(user) || !myShiftSession || myShiftSession.clock_out) {
+      return undefined;
+    }
+    const timer = setInterval(() => {
+      setTimelineTick(tick => tick + 1);
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [user, myShiftSession]);
+
+  const myShiftInfo = useMemo(() => {
+    void timelineTick;
+    if (!myShiftSession) {
+      return {
+        statusText: 'Not clocked in',
+        statusColor: '#8B949E',
+        activeMs: 0,
+        clockInText: '--',
+      };
+    }
+
+    let workMs = 0;
+    (myShiftSession.segments || []).forEach(seg => {
+      if (seg.kind !== 'working') return;
+      const start = new Date(seg.started_at).getTime();
+      const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
+      workMs += Math.max(0, end - start);
+    });
+
+    let statusText = 'Offline';
+    let statusColor = '#8B949E';
+    const lastSeg =
+      myShiftSession.segments && myShiftSession.segments[myShiftSession.segments.length - 1];
+
+    if (myShiftSession.status === 'active') {
+      if (lastSeg && !lastSeg.ended_at && lastSeg.kind === 'idle') {
+        statusText = 'Idle';
+        statusColor = '#F85149';
+      } else {
+        statusText = 'Working';
+        statusColor = '#3498DB';
+      }
+    } else if (myShiftSession.status === 'paused') {
+      if (lastSeg?.label && String(lastSeg.label).toLowerCase().includes('meeting')) {
+        statusText = 'Meeting';
+        statusColor = '#9B59B6';
+      } else {
+        statusText = 'On Break';
+        statusColor = '#F5C542';
+      }
+    } else if (myShiftSession.clock_out) {
+      statusText = 'Completed';
+      statusColor = '#3DDC84';
+    }
+
+    return {
+      statusText,
+      statusColor,
+      activeMs: workMs,
+      clockInText: formatTimeOfDay(myShiftSession.clock_in),
+    };
+  }, [myShiftSession, timelineTick]);
+
+  const myShiftDetailStats = useMemo(() => {
+    void timelineTick;
+    let workMs = 0;
+    let meetingMs = 0;
+    let breakMs = 0;
+    let idleMs = 0;
+    const now = Date.now();
+
+    (myShiftSession?.segments || []).forEach(seg => {
+      const start = new Date(seg.started_at).getTime();
+      const end = seg.ended_at ? new Date(seg.ended_at).getTime() : now;
+      const duration = Math.max(0, end - start);
+      const isMeeting =
+        seg.kind === 'meeting' ||
+        (seg.kind === 'break' &&
+          String(seg.label || '').toLowerCase().includes('meeting'));
+
+      if (seg.kind === 'working') {
+        workMs += duration;
+      } else if (seg.kind === 'idle') {
+        idleMs += duration;
+      } else if (isMeeting) {
+        meetingMs += duration;
+      } else if (seg.kind === 'break') {
+        breakMs += duration;
+      }
+    });
+
+    return {
+      workMs,
+      meetingMs,
+      breakMs,
+      idleMs,
+      workTime: formatDuration(workMs),
+      meetingTime: formatDuration(meetingMs),
+      breakTime: formatDuration(breakMs),
+      idleTime: formatDuration(idleMs),
+    };
+  }, [myShiftSession, timelineTick]);
+
+  const myShiftLogItems = useMemo(() => {
+    void timelineTick;
+    if (!myShiftSession) return [];
+
+    const items = [];
+    if (myShiftSession.clock_in) {
+      items.push({
+        id: 'clock-in',
+        timeText: formatTimeOfDay(myShiftSession.clock_in),
+        label: 'Logged in',
+        duration: null,
+        color: '#3DDC84',
+        rightText: `→ ${formatTimeOfDay(myShiftSession.clock_in)}`,
+      });
+    }
+
+    (myShiftSession.segments || []).forEach((seg, index) => {
+      const isMeeting =
+        seg.kind === 'meeting' ||
+        (seg.kind === 'break' &&
+          String(seg.label || '').toLowerCase().includes('meeting'));
+      let label = seg.label;
+      if (!label) {
+        if (seg.kind === 'working') label = 'Working';
+        else if (seg.kind === 'idle') label = 'System Idle';
+        else if (isMeeting) label = 'Meeting';
+        else label = seg.kind || 'Activity';
+      }
+
+      const start = new Date(seg.started_at).getTime();
+      const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
+      items.push({
+        id: seg.id || `seg-${index}`,
+        timeText: formatTimeOfDay(seg.started_at),
+        label,
+        duration: formatDuration(Math.max(0, end - start)),
+        color: getSegmentColor(seg.kind, seg.label),
+        rightText: seg.ended_at
+          ? `→ ${formatTimeOfDay(seg.ended_at)}`
+          : 'Ongoing',
+      });
+    });
+
+    return items;
+  }, [myShiftSession, timelineTick]);
+
+  const loadMyShiftDetailTasks = useCallback(async () => {
+    if (!user?.id || !isSupabaseConfigured) {
+      setDetailTasks([]);
+      return;
+    }
+
+    setDetailTasksLoading(true);
+    try {
+      const supabase = getSupabase();
+      const dateKey = getLocalDateKey(new Date());
+      const startOfDayMs = new Date(`${dateKey}T00:00:00`).getTime();
+      const endOfDayMs = new Date(`${dateKey}T23:59:59.999`).getTime();
+      const nowMs = Date.now();
+
+      const { data: projects } = await supabase.from('projects').select('id, name');
+      const projectNameById = {};
+      (projects || []).forEach(p => {
+        projectNameById[p.id] = p.name;
+      });
+
+      const { data: rawTasks } = await supabase.from('project_tasks').select('*');
+      const myTasks = (rawTasks || []).filter(task => {
+        const ids = [];
+        if (Array.isArray(task.assignee_ids)) ids.push(...task.assignee_ids);
+        else if (typeof task.assignee_ids === 'string') {
+          try {
+            const parsed = JSON.parse(task.assignee_ids);
+            if (Array.isArray(parsed)) ids.push(...parsed);
+          } catch {
+            ids.push(...task.assignee_ids.split(',').map(s => s.trim()));
+          }
+        }
+        if (task.assignee_id) ids.push(task.assignee_id);
+        return ids.includes(user.id);
+      });
+
+      if (myTasks.length === 0) {
+        setDetailTasks([]);
+        return;
+      }
+
+      const taskIds = myTasks.map(t => t.id);
+      const { data: history } = await supabase
+        .from('task_status_history')
+        .select('*')
+        .in('task_id', taskIds);
+
+      const tasksWithTime = myTasks
+        .map(task => {
+          let progressSecs = 0;
+          (history || [])
+            .filter(h => h.task_id === task.id)
+            .forEach(h => {
+              const status = String(h.to_status || '').toLowerCase();
+              if (status !== 'in-progress' && status !== 'doing') return;
+              const entered = new Date(h.entered_at).getTime();
+              const exited = h.exited_at
+                ? new Date(h.exited_at).getTime()
+                : nowMs;
+              const overlapStart = Math.max(entered, startOfDayMs);
+              const overlapEnd = Math.min(exited, endOfDayMs, nowMs);
+              if (overlapStart < overlapEnd) {
+                progressSecs += Math.floor((overlapEnd - overlapStart) / 1000);
+              }
+            });
+
+          return {
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            project_name: projectNameById[task.project_id] || 'General',
+            progressSecs,
+          };
+        })
+        .filter(
+          t =>
+            t.progressSecs > 0 ||
+            t.status === 'in-progress' ||
+            t.status === 'doing',
+        )
+        .sort((a, b) => b.progressSecs - a.progressSecs);
+
+      setDetailTasks(tasksWithTime);
+    } catch (e) {
+      console.error('Error loading shift detail tasks:', e);
+      setDetailTasks([]);
+    } finally {
+      setDetailTasksLoading(false);
+    }
+  }, [user?.id]);
+
+  const openShiftDetailModal = useCallback(() => {
+    setShowShiftDetailModal(true);
+    loadMyDailyShift();
+    loadMyShiftDetailTasks();
+  }, [loadMyDailyShift, loadMyShiftDetailTasks]);
 
   const ceoStats = useMemo(() => {
     let working = 0;
@@ -498,8 +814,10 @@ const DashboardScreen = () => {
     const todayKey = getLocalDateKey();
     const todayDay = weeklyData?.days?.find(day => day.dateKey === todayKey);
     const savedHours = todayDay?.hours || 0;
-    const liveHours = elapsedSeconds / 3600;
-    const todayHours = Math.max(savedHours, liveHours);
+    const liveHours = todayDay?.fromSegments
+      ? savedHours
+      : Math.max(savedHours, elapsedSeconds / 3600);
+    const todayHours = liveHours;
 
     return Math.min(
       100,
@@ -670,6 +988,84 @@ const DashboardScreen = () => {
                       : `${taskStats.done}/${taskStats.total}`}
                 </Text>
               </View>
+            </View>
+          )}
+
+          {!isCeoAdminUser(user) && (
+            <View style={styles.sectionCard}>
+              <View style={styles.dailyTimelineHeader}>
+                <View style={styles.dailyTimelineTitleWrap}>
+                  <Text style={styles.sectionTitle}>Daily Timeline</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    04:00 AM → 03:00 AM · only your shift
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.dailyTimelineViewBtn}
+                  activeOpacity={0.8}
+                  onPress={openShiftDetailModal}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Icon name="eye" size={wp(3.4)} color="#5DADE2" />
+                  <Text style={styles.dailyTimelineViewBtnText}>View</Text>
+                  <Icon name="chevron-right" size={wp(3.4)} color="#5DADE2" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.timelineLegendRow}>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: '#3498DB' }]} />
+                  <Text style={styles.legendText}>Working</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: '#9B59B6' }]} />
+                  <Text style={styles.legendText}>Meeting</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: '#F5C542' }]} />
+                  <Text style={styles.legendText}>Break</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, { backgroundColor: '#F85149' }]} />
+                  <Text style={styles.legendText}>Idle</Text>
+                </View>
+              </View>
+
+              {myShiftLoading ? (
+                <ActivityIndicator size="small" color={PURPLE} style={styles.loaderSpacing} />
+              ) : (
+                <>
+                  <View style={styles.myTimelineBarWrap}>
+                    <View style={styles.myTimelineBarInner}>
+                      {renderTimelineBar(myShiftSession?.segments || [], Date.now())}
+                    </View>
+                  </View>
+                  <View style={styles.myTimelineAxis}>
+                    <Text style={styles.myAxisText}>4AM</Text>
+                    <Text style={styles.myAxisText}>7AM</Text>
+                    <Text style={styles.myAxisText}>10AM</Text>
+                    <Text style={styles.myAxisText}>1PM</Text>
+                    <Text style={styles.myAxisText}>4PM</Text>
+                    <Text style={styles.myAxisText}>7PM</Text>
+                    <Text style={styles.myAxisText}>10PM</Text>
+                    <Text style={styles.myAxisText}>1AM</Text>
+                    <Text style={styles.myAxisText}>3AM</Text>
+                  </View>
+                  <View style={styles.myShiftMetaRow}>
+                    <Text style={styles.myShiftMetaText}>
+                      Status:{' '}
+                      <Text style={{ color: myShiftInfo.statusColor }}>
+                        {myShiftInfo.statusText}
+                      </Text>
+                    </Text>
+                    <Text style={styles.myShiftMetaText}>
+                      Clock in: {myShiftInfo.clockInText}
+                    </Text>
+                    <Text style={styles.myShiftMetaText}>
+                      Active: {formatDuration(myShiftInfo.activeMs)}
+                    </Text>
+                  </View>
+                </>
+              )}
             </View>
           )}
 
@@ -933,6 +1329,116 @@ const DashboardScreen = () => {
           )}
         </ScrollView>
       </SafeAreaView>
+      <Modal
+        visible={showShiftDetailModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowShiftDetailModal(false)}>
+        <View style={styles.detailModalOverlay}>
+          <View style={styles.detailModalCard}>
+            <View style={styles.detailModalHeader}>
+              <View style={styles.detailModalTitleWrap}>
+                <Text style={styles.detailModalTitle}>Today's Shift Details</Text>
+                <Text style={styles.detailModalSubtitle}>
+                  {myShiftInfo.statusText} · In {myShiftInfo.clockInText}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowShiftDetailModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Icon name="x" size={wp(6)} color={darkTextSecondaryColor} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.detailModalScroll}>
+              <View style={styles.detailMetricsGrid}>
+                <View style={[styles.detailMetricCard, { borderColor: 'rgba(52, 152, 219, 0.2)' }]}>
+                  <Icon name="activity" size={wp(4.5)} color="#3498DB" />
+                  <Text style={styles.detailMetricValue}>{myShiftDetailStats.workTime}</Text>
+                  <Text style={styles.detailMetricLabel}>Work Time</Text>
+                </View>
+                <View style={[styles.detailMetricCard, { borderColor: 'rgba(155, 89, 182, 0.2)' }]}>
+                  <Icon name="users" size={wp(4.5)} color="#9B59B6" />
+                  <Text style={styles.detailMetricValue}>{myShiftDetailStats.meetingTime}</Text>
+                  <Text style={styles.detailMetricLabel}>Meeting</Text>
+                </View>
+                <View style={[styles.detailMetricCard, { borderColor: 'rgba(245, 197, 66, 0.2)' }]}>
+                  <Icon name="coffee" size={wp(4.5)} color="#F5C542" />
+                  <Text style={styles.detailMetricValue}>{myShiftDetailStats.breakTime}</Text>
+                  <Text style={styles.detailMetricLabel}>Break / Lunch</Text>
+                </View>
+                <View style={[styles.detailMetricCard, { borderColor: 'rgba(248, 81, 73, 0.2)' }]}>
+                  <Icon name="eye-off" size={wp(4.5)} color="#F85149" />
+                  <Text style={styles.detailMetricValue}>{myShiftDetailStats.idleTime}</Text>
+                  <Text style={styles.detailMetricLabel}>Idle</Text>
+                </View>
+              </View>
+
+              <Text style={styles.detailSectionTitle}>Daily Timeline</Text>
+              <View style={styles.myTimelineBarWrap}>
+                <View style={styles.myTimelineBarInner}>
+                  {renderTimelineBar(myShiftSession?.segments || [], Date.now())}
+                </View>
+              </View>
+              <View style={styles.myTimelineAxis}>
+                <Text style={styles.myAxisText}>4AM</Text>
+                <Text style={styles.myAxisText}>7AM</Text>
+                <Text style={styles.myAxisText}>10AM</Text>
+                <Text style={styles.myAxisText}>1PM</Text>
+                <Text style={styles.myAxisText}>4PM</Text>
+                <Text style={styles.myAxisText}>7PM</Text>
+                <Text style={styles.myAxisText}>10PM</Text>
+                <Text style={styles.myAxisText}>1AM</Text>
+                <Text style={styles.myAxisText}>3AM</Text>
+              </View>
+
+              <Text style={styles.detailSectionTitle}>Tasks Worked Today</Text>
+              {detailTasksLoading ? (
+                <ActivityIndicator size="small" color={PURPLE} style={styles.loaderSpacing} />
+              ) : detailTasks.length === 0 ? (
+                <Text style={styles.detailEmptyText}>No task work logged today.</Text>
+              ) : (
+                detailTasks.map(task => (
+                  <View key={task.id} style={styles.detailTaskRow}>
+                    <View style={styles.detailTaskLeft}>
+                      <Text style={styles.detailTaskTitle} numberOfLines={2}>
+                        {task.title}
+                      </Text>
+                      <Text style={styles.detailTaskMeta}>
+                        {task.project_name} · {task.status}
+                      </Text>
+                    </View>
+                    <Text style={styles.detailTaskTime}>
+                      {formatDuration(task.progressSecs * 1000)}
+                    </Text>
+                  </View>
+                ))
+              )}
+
+              <Text style={styles.detailSectionTitle}>Activity Log</Text>
+              {myShiftLogItems.length === 0 ? (
+                <Text style={styles.detailEmptyText}>No activity recorded yet today.</Text>
+              ) : (
+                myShiftLogItems.map(item => (
+                  <View key={item.id} style={styles.detailLogRow}>
+                    <View style={[styles.detailLogDot, { backgroundColor: item.color }]} />
+                    <View style={styles.detailLogContent}>
+                      <Text style={styles.detailLogTime}>{item.timeText}</Text>
+                      <Text style={styles.detailLogLabel}>
+                        {item.label}
+                        {item.duration ? ` (${item.duration})` : ''}
+                      </Text>
+                    </View>
+                    <Text style={styles.detailLogRight}>{item.rightText}</Text>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <ClockOutReasonModal
         visible={showReasonModal}
         onConfirm={confirmClockOut}
@@ -1336,6 +1842,220 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     borderRadius: wp(0.4),
+  },
+  dailyTimelineHeader: {
+    marginBottom: hp(1.6),
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: wp(4),
+  },
+  dailyTimelineTitleWrap: {
+    flex: 1,
+    gap: hp(0.45),
+    paddingRight: wp(2),
+  },
+  dailyTimelineViewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(1.2),
+    marginTop: hp(0.2),
+    backgroundColor: 'rgba(52, 152, 219, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 152, 219, 0.35)',
+    paddingHorizontal: wp(3.2),
+    paddingVertical: hp(0.85),
+    borderRadius: wp(2),
+  },
+  dailyTimelineViewBtnText: {
+    fontSize: wp(3.1),
+    fontWeight: '600',
+    color: '#5DADE2',
+    letterSpacing: 0.2,
+  },
+  timelineLegendRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: wp(3),
+    marginBottom: hp(1.2),
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: wp(1.2),
+  },
+  legendDot: {
+    width: wp(2.2),
+    height: wp(2.2),
+    borderRadius: wp(1.1),
+  },
+  legendText: {
+    fontSize: wp(2.8),
+    color: darkTextSecondaryColor,
+  },
+  myTimelineBarWrap: {
+    marginBottom: hp(0.8),
+  },
+  myTimelineBarInner: {
+    minHeight: hp(3.2),
+    justifyContent: 'center',
+  },
+  myTimelineAxis: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: hp(1.2),
+  },
+  myAxisText: {
+    fontSize: wp(2.2),
+    color: darkTextSecondaryColor,
+  },
+  myShiftMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: wp(3),
+  },
+  myShiftMetaText: {
+    fontSize: wp(3),
+    color: darkTextSecondaryColor,
+  },
+  detailModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  detailModalCard: {
+    backgroundColor: darkSurfaceColor,
+    borderTopLeftRadius: wp(5),
+    borderTopRightRadius: wp(5),
+    maxHeight: hp(88),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    paddingBottom: hp(2),
+  },
+  detailModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: wp(5),
+    paddingTop: hp(2),
+    paddingBottom: hp(1.5),
+    borderBottomWidth: 1,
+    borderBottomColor: darkBorderColor,
+  },
+  detailModalTitleWrap: {
+    flex: 1,
+    paddingRight: wp(3),
+  },
+  detailModalTitle: {
+    ...style.fontSizeLarge,
+    ...style.fontWeightBold,
+    color: whiteColor,
+  },
+  detailModalSubtitle: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+    marginTop: hp(0.3),
+  },
+  detailModalScroll: {
+    paddingHorizontal: wp(5),
+    paddingTop: hp(2),
+    paddingBottom: hp(4),
+  },
+  detailMetricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: hp(1.2),
+    marginBottom: hp(2),
+  },
+  detailMetricCard: {
+    width: '48%',
+    backgroundColor: darkBackgroundColor,
+    borderRadius: wp(3),
+    borderWidth: 1,
+    paddingVertical: hp(1.5),
+    paddingHorizontal: wp(3),
+    gap: hp(0.4),
+  },
+  detailMetricValue: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightBold,
+    color: whiteColor,
+  },
+  detailMetricLabel: {
+    fontSize: wp(2.8),
+    color: darkTextSecondaryColor,
+  },
+  detailSectionTitle: {
+    ...style.fontSizeNormal,
+    ...style.fontWeightMedium,
+    color: whiteColor,
+    marginBottom: hp(1),
+    marginTop: hp(0.5),
+  },
+  detailEmptyText: {
+    ...style.fontSizeSmall,
+    color: darkTextSecondaryColor,
+    marginBottom: hp(1.5),
+  },
+  detailTaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: darkBackgroundColor,
+    borderRadius: wp(2.5),
+    borderWidth: 1,
+    borderColor: darkBorderColor,
+    paddingHorizontal: wp(3.5),
+    paddingVertical: hp(1.2),
+    marginBottom: hp(1),
+  },
+  detailTaskLeft: {
+    flex: 1,
+    paddingRight: wp(2),
+  },
+  detailTaskTitle: {
+    ...style.fontSizeSmall2x,
+    color: darkTextPrimaryColor,
+    ...style.fontWeightMedium,
+  },
+  detailTaskMeta: {
+    fontSize: wp(2.7),
+    color: darkTextSecondaryColor,
+    marginTop: hp(0.3),
+  },
+  detailTaskTime: {
+    ...style.fontSizeSmall2x,
+    color: '#3498DB',
+    ...style.fontWeightMedium,
+  },
+  detailLogRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: hp(1.2),
+  },
+  detailLogDot: {
+    width: wp(2.4),
+    height: wp(2.4),
+    borderRadius: wp(1.2),
+    marginTop: hp(0.5),
+    marginRight: wp(2.5),
+  },
+  detailLogContent: {
+    flex: 1,
+  },
+  detailLogTime: {
+    fontSize: wp(2.6),
+    color: darkTextSecondaryColor,
+  },
+  detailLogLabel: {
+    ...style.fontSizeSmall,
+    color: darkTextPrimaryColor,
+    marginTop: hp(0.2),
+  },
+  detailLogRight: {
+    fontSize: wp(2.6),
+    color: darkTextSecondaryColor,
+    marginLeft: wp(2),
   },
   leaveList: {
     gap: hp(1.2),

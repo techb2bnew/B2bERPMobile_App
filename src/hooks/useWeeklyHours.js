@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAttendance } from '../context/AttendanceContext';
 import {
@@ -11,9 +12,17 @@ import {
 } from '../services/clockSessionsService';
 import { syncSupabaseRealtimeAuth } from '../lib/supabase';
 
-const applyLiveTodayHours = (weeklyData, elapsedSeconds) => {
+const LIVE_REFRESH_MS = 15000;
+
+const applyLiveTodayHours = (weeklyData, elapsedSeconds, preferSegments) => {
   if (!weeklyData) {
     return getEmptyWeeklyHours();
+  }
+
+  // When hours come from working segments (web meeting/lunch aware),
+  // don't override with the local mobile timer.
+  if (preferSegments) {
+    return weeklyData;
   }
 
   const todayKey = getLocalDateKey();
@@ -55,6 +64,7 @@ export const useWeeklyHours = employeeId => {
   const { elapsedSeconds, isClockedIn } = useAttendance();
   const [weeklyData, setWeeklyData] = useState(getEmptyWeeklyHours());
   const [loading, setLoading] = useState(true);
+  const refreshTimerRef = useRef(null);
 
   const loadWeeklyHours = useCallback(async ({ silent = false } = {}) => {
     if (!employeeId) {
@@ -82,6 +92,24 @@ export const useWeeklyHours = employeeId => {
   useFocusEffect(
     useCallback(() => {
       loadWeeklyHours();
+
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+      }
+
+      // Keep today's open working segment ticking like web
+      refreshTimerRef.current = setInterval(() => {
+        if (AppState.currentState === 'active') {
+          loadWeeklyHours({ silent: true });
+        }
+      }, LIVE_REFRESH_MS);
+
+      return () => {
+        if (refreshTimerRef.current) {
+          clearInterval(refreshTimerRef.current);
+          refreshTimerRef.current = null;
+        }
+      };
     }, [loadWeeklyHours]),
   );
 
@@ -107,8 +135,17 @@ export const useWeeklyHours = employeeId => {
     return unsubscribe;
   }, [employeeId, loadWeeklyHours]);
 
+  const todayKey = getLocalDateKey();
+  const todayFromSegments = Boolean(
+    weeklyData?.days?.find(day => day.dateKey === todayKey)?.fromSegments,
+  );
+
   return {
-    weeklyData: applyLiveTodayHours(weeklyData, elapsedSeconds),
+    weeklyData: applyLiveTodayHours(
+      weeklyData,
+      elapsedSeconds,
+      todayFromSegments,
+    ),
     loading,
     refresh: loadWeeklyHours,
   };

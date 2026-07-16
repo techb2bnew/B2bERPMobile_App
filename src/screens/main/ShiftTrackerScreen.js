@@ -39,8 +39,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 const PURPLE = '#9B59B6';
-const SHIFT_START_HOUR = 10; // 10:00 AM
-const SHIFT_END_HOUR = 21;   // 09:00 PM
+const SHIFT_START_HOUR = 4;  // 04:00 AM
+const SHIFT_END_HOUR = 27;   // 03:00 AM next day (24 + 3)
 const TOTAL_SHIFT_MS = (SHIFT_END_HOUR - SHIFT_START_HOUR) * 60 * 60 * 1000;
 
 const MOCK_SESSIONS = [
@@ -1085,7 +1085,7 @@ const ShiftTrackerScreen = () => {
     setSelectedSessionId(sessionId);
   };
 
-  // Time Window boundaries (10:00 AM to 09:00 PM)
+  // Time Window boundaries (04:00 AM → 03:00 AM next day)
   const shiftBoundaries = useMemo(() => {
     const startOfDay = new Date(selectedDate);
     startOfDay.setHours(0, 0, 0, 0);
@@ -1500,23 +1500,18 @@ const ShiftTrackerScreen = () => {
 
     return (
       <View style={styles.timelineContainer}>
-        {/* Hour Guide lines (10 AM to 9 PM = 11 intervals) */}
-        <View style={[styles.gridline, { left: '9.09%' }]} />
-        <View style={[styles.gridline, { left: '18.18%' }]} />
-        <View style={[styles.gridline, { left: '27.27%' }]} />
-        <View style={[styles.gridline, { left: '36.36%' }]} />
-        <View style={[styles.gridline, { left: '45.45%' }]} />
-        <View style={[styles.gridline, { left: '54.54%' }]} />
-        <View style={[styles.gridline, { left: '63.63%' }]} />
-        <View style={[styles.gridline, { left: '72.72%' }]} />
-        <View style={[styles.gridline, { left: '81.81%' }]} />
-        <View style={[styles.gridline, { left: '90.90%' }]} />
+        {/* Hour Guide lines (4 AM → 3 AM next day = 23h, marks every ~4h) */}
+        <View style={[styles.gridline, { left: '17.39%' }]} />
+        <View style={[styles.gridline, { left: '34.78%' }]} />
+        <View style={[styles.gridline, { left: '52.17%' }]} />
+        <View style={[styles.gridline, { left: '69.57%' }]} />
+        <View style={[styles.gridline, { left: '86.96%' }]} />
 
         {segments.map((seg) => {
           const segStart = new Date(seg.started_at).getTime();
           const segEnd = seg.ended_at ? new Date(seg.ended_at).getTime() : referenceTime;
 
-          // Calculate offsets relative to the shift window (10 AM to 9 PM)
+          // Calculate offsets relative to the shift window (4 AM → 3 AM next day)
           const startOffset = Math.max(0, segStart - shiftBoundaries.start);
           const endOffset = Math.min(TOTAL_SHIFT_MS, segEnd - shiftBoundaries.start);
 
@@ -1936,13 +1931,13 @@ const ShiftTrackerScreen = () => {
               <View style={styles.timeAxisRow}>
                 <View style={styles.axisSpacer} />
                 <View style={styles.axisScaleContainer}>
-                  <Text style={styles.axisScaleText}>10 AM</Text>
+                  <Text style={styles.axisScaleText}>4 AM</Text>
+                  <Text style={styles.axisScaleText}>8 AM</Text>
                   <Text style={styles.axisScaleText}>12 PM</Text>
-                  <Text style={styles.axisScaleText}>2 PM</Text>
                   <Text style={styles.axisScaleText}>4 PM</Text>
-                  <Text style={styles.axisScaleText}>6 PM</Text>
                   <Text style={styles.axisScaleText}>8 PM</Text>
-                  <Text style={styles.axisScaleText}>9 PM</Text>
+                  <Text style={styles.axisScaleText}>12 AM</Text>
+                  <Text style={styles.axisScaleText}>3 AM</Text>
                 </View>
                 <View style={styles.axisRightSpacer} />
               </View>
@@ -2094,7 +2089,7 @@ const ShiftTrackerScreen = () => {
                           <Icon name="clock" size={wp(3.8)} color={darkTextSecondaryColor} />
                           <View style={styles.liveItemTexts}>
                             <Text style={styles.liveItemLabel}>Shift ends</Text>
-                            <Text style={styles.liveItemValue} numberOfLines={1}>09:00 PM</Text>
+                            <Text style={styles.liveItemValue} numberOfLines={1}>03:00 AM</Text>
                           </View>
                         </View>
 
@@ -2146,7 +2141,7 @@ const ShiftTrackerScreen = () => {
                   <View style={styles.modalTimelineBox}>
                     <View style={styles.timelineHeaderRow}>
                       <Text style={styles.timelineTitle}>
-                        Daily Timeline • 10:00 AM → 09:00 PM
+                        Daily Timeline • 04:00 AM → 03:00 AM
                       </Text>
                     </View>
 
@@ -2176,13 +2171,13 @@ const ShiftTrackerScreen = () => {
 
                     {/* Axis Labels */}
                     <View style={styles.modalTimeAxis}>
-                      <Text style={styles.modalAxisText}>10 AM</Text>
+                      <Text style={styles.modalAxisText}>4 AM</Text>
+                      <Text style={styles.modalAxisText}>8 AM</Text>
                       <Text style={styles.modalAxisText}>12 PM</Text>
-                      <Text style={styles.modalAxisText}>2 PM</Text>
                       <Text style={styles.modalAxisText}>4 PM</Text>
-                      <Text style={styles.modalAxisText}>6 PM</Text>
                       <Text style={styles.modalAxisText}>8 PM</Text>
-                      <Text style={styles.modalAxisText}>9 PM</Text>
+                      <Text style={styles.modalAxisText}>12 AM</Text>
+                      <Text style={styles.modalAxisText}>3 AM</Text>
                     </View>
                   </View>
 

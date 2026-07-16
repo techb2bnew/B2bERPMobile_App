@@ -29,6 +29,13 @@ const applyLiveTodayHours = (rangeData, elapsedSeconds, startDateKey, endDateKey
   }
 
   const todayKey = getLocalDateKey();
+  const todayDay = rangeData.days?.find(day => day.dateKey === todayKey);
+
+  // Segment-based hours already include open working time; don't mix local timer.
+  if (todayDay?.fromSegments) {
+    return rangeData;
+  }
+
   const liveHours = elapsedSeconds / 3600;
   const includesToday = todayKey >= startDateKey && todayKey <= endDateKey;
 

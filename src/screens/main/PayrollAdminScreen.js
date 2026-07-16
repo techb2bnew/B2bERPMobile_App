@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import AppHeader from '../../components/AppHeader';
 import UserAvatar from '../../components/UserAvatar';
-import { fetchHrmsMonthlyData } from '../../services/hrmsService';
+import { fetchHrmsMonthlyData, savePayrollMonthlySnapshot } from '../../services/hrmsService';
 import { updateEmployeeProfile, getEmployeeProfileImageUrl } from '../../services/employeeService';
 import {
   darkBackgroundColor,
@@ -53,8 +53,15 @@ const PayrollAdminScreen = () => {
     if (!monthKey) return;
     try {
       const data = await fetchHrmsMonthlyData(monthKey);
-      setPayrollData(data.employees || []);
+      const employees = data.employees || [];
+      setPayrollData(employees);
       setDatesList(data.datesList || []);
+
+      try {
+        await savePayrollMonthlySnapshot(monthKey, employees);
+      } catch (saveError) {
+        console.warn('Payroll monthly snapshot save failed:', saveError);
+      }
     } catch (error) {
       console.error('Error fetching payroll data:', error);
       Alert.alert('Error', 'Failed to load payroll data');

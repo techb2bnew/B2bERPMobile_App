@@ -6,6 +6,7 @@ import {
 } from '../lib/supabase';
 
 const CLOCK_SESSIONS_TABLE = 'clock_sessions';
+const CLOCK_SESSION_SEGMENTS_TABLE = 'clock_session_segments';
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 const SHORT_DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FULL_DAY_LABELS = [
@@ -251,22 +252,58 @@ const groupSessionsByDate = sessions => {
       hours: 0,
       clockIn: session.clock_in,
       clockOut: session.clock_out,
+      sessionIds: [],
+      hasOpenSession: false,
     };
 
     existing.hours += Number(session.hours) || 0;
+    if (session.id) {
+      existing.sessionIds.push(session.id);
+    }
 
     if (session.clock_in && (!existing.clockIn || session.clock_in < existing.clockIn)) {
       existing.clockIn = session.clock_in;
     }
 
-    if (session.clock_out && (!existing.clockOut || session.clock_out > existing.clockOut)) {
-      existing.clockOut = session.clock_out;
+    if (!session.clock_out) {
+      existing.hasOpenSession = true;
+      existing.clockOut = null;
+    } else if (!existing.hasOpenSession) {
+      if (!existing.clockOut || session.clock_out > existing.clockOut) {
+        existing.clockOut = session.clock_out;
+      }
     }
 
     grouped[dateKey] = existing;
   });
 
   return grouped;
+};
+
+const isWorkingSegment = seg => {
+  if (!seg) return false;
+  if (seg.kind === 'working') return true;
+  if (seg.kind === 'idle' || seg.kind === 'break' || seg.kind === 'meeting') {
+    return false;
+  }
+  return false;
+};
+
+const sumWorkingHoursFromSegments = (segments, nowMs = Date.now()) => {
+  let totalMs = 0;
+
+  (segments || []).forEach(seg => {
+    if (!isWorkingSegment(seg) || !seg.started_at) {
+      return;
+    }
+    const start = new Date(seg.started_at).getTime();
+    const end = seg.ended_at ? new Date(seg.ended_at).getTime() : nowMs;
+    if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+      totalMs += end - start;
+    }
+  });
+
+  return secondsToHours(totalMs / 1000);
 };
 
 export const saveDailyClockSession = async ({
@@ -374,10 +411,11 @@ export const fetchHoursForEmployeeInRange = async (
   const rangeDays = buildDaysInRange(startDateKey, endDateKey);
   const rangeStart = new Date(`${startDateKey}T00:00:00`).toISOString();
   const rangeEnd = new Date(`${endDateKey}T23:59:59.999`).toISOString();
+  const nowMs = Date.now();
 
   const { data, error } = await getSupabase()
     .from(CLOCK_SESSIONS_TABLE)
-    .select('hours, clock_in, clock_out')
+    .select('id, hours, clock_in, clock_out, status')
     .eq('employee_id', employeeId)
     .gte('clock_in', rangeStart)
     .lte('clock_in', rangeEnd)
@@ -387,7 +425,42 @@ export const fetchHoursForEmployeeInRange = async (
     throw new Error(error.message || 'Failed to load hours for selected dates');
   }
 
-  const grouped = groupSessionsByDate(data || []);
+  const sessions = data || [];
+  const sessionIds = sessions.map(s => s.id).filter(Boolean);
+  let segmentsBySessionId = {};
+
+  if (sessionIds.length > 0) {
+    const { data: rawSegments, error: segError } = await getSupabase()
+      .from(CLOCK_SESSION_SEGMENTS_TABLE)
+      .select('id, session_id, kind, label, started_at, ended_at')
+      .in('session_id', sessionIds)
+      .order('started_at', { ascending: true });
+
+    if (!segError && rawSegments) {
+      segmentsBySessionId = rawSegments.reduce((map, seg) => {
+        if (!map[seg.session_id]) {
+          map[seg.session_id] = [];
+        }
+        map[seg.session_id].push(seg);
+        return map;
+      }, {});
+    }
+  }
+
+  const grouped = groupSessionsByDate(sessions);
+
+  // Prefer live working-segment hours (matches web meeting/lunch behavior)
+  Object.keys(grouped).forEach(dateKey => {
+    const daySessionIds = grouped[dateKey].sessionIds || [];
+    const daySegments = daySessionIds.flatMap(
+      id => segmentsBySessionId[id] || [],
+    );
+
+    if (daySegments.length > 0) {
+      grouped[dateKey].hours = sumWorkingHoursFromSegments(daySegments, nowMs);
+      grouped[dateKey].fromSegments = true;
+    }
+  });
 
   const dayRows = rangeDays.map(day => {
     const session = grouped[day.dateKey];
@@ -400,6 +473,7 @@ export const fetchHoursForEmployeeInRange = async (
       clockIn: formatClockTime(session?.clockIn),
       clockOut: formatClockTime(session?.clockOut),
       barPercent: Math.min(100, (hours / MAX_DAILY_HOURS_FOR_BAR) * 100),
+      fromSegments: Boolean(session?.fromSegments),
     };
   });
 
@@ -411,7 +485,7 @@ export const fetchWeeklyHoursForEmployee = async employeeId => {
   return fetchHoursForEmployeeInRange(employeeId, startDateKey, endDateKey);
 };
 
-const CLOCK_REALTIME_EVENTS = ['INSERT', 'UPDATE'];
+const CLOCK_REALTIME_EVENTS = ['INSERT', 'UPDATE', 'DELETE'];
 
 export const subscribeToEmployeeClockSessions = (employeeId, onChange) => {
   if (!isSupabaseConfigured || !employeeId) {
@@ -431,6 +505,30 @@ export const subscribeToEmployeeClockSessions = (employeeId, onChange) => {
     }
   };
 
+  const notifyIfOwnedSegment = async payload => {
+    const sessionId =
+      payload?.new?.session_id || payload?.old?.session_id || null;
+    if (!sessionId) {
+      return;
+    }
+
+    try {
+      const { data } = await getSupabase()
+        .from(CLOCK_SESSIONS_TABLE)
+        .select('employee_id')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+      if (data?.employee_id === employeeId) {
+        onChangeRef.current(payload);
+      }
+    } catch (e) {
+      if (__DEV__) {
+        console.warn('[realtime] segment ownership check failed', e?.message);
+      }
+    }
+  };
+
   const connect = async () => {
     if (!active) {
       return;
@@ -445,7 +543,7 @@ export const subscribeToEmployeeClockSessions = (employeeId, onChange) => {
     teardownChannel();
 
     const supabase = getSupabase();
-    const channelName = createRealtimeChannelName(`clock-sessions-${employeeId}`);
+    const channelName = createRealtimeChannelName(`clock-attendance-${employeeId}`);
     const nextChannel = supabase.channel(channelName);
 
     CLOCK_REALTIME_EVENTS.forEach(event => {
@@ -464,13 +562,36 @@ export const subscribeToEmployeeClockSessions = (employeeId, onChange) => {
           onChangeRef.current(payload);
         },
       );
+
+      nextChannel.on(
+        'postgres_changes',
+        {
+          event,
+          schema: 'public',
+          table: CLOCK_SESSION_SEGMENTS_TABLE,
+        },
+        payload => {
+          if (__DEV__) {
+            console.log(
+              '[realtime] clock_session_segments event',
+              payload.eventType,
+            );
+          }
+          notifyIfOwnedSegment(payload);
+        },
+      );
     });
 
     channel = nextChannel;
 
     channel.subscribe((status, err) => {
       if (__DEV__) {
-        console.log('[realtime] clock_sessions channel', channelName, status, err?.message || '');
+        console.log(
+          '[realtime] clock attendance channel',
+          channelName,
+          status,
+          err?.message || '',
+        );
       }
 
       if (!active) {

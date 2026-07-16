@@ -6,6 +6,7 @@ const CLOCK_SESSIONS_TABLE = 'clock_sessions';
 const CLOCK_SESSION_SEGMENTS_TABLE = 'clock_session_segments';
 const LEAVE_REQUESTS_TABLE = 'leave_requests';
 const EMPLOYEE_PROFILES_TABLE = 'employee_profiles';
+const EMPLOYEE_PAYROLL_MONTHLY_TABLE = 'employee_payroll_monthly';
 
 // Mock list of employees for fallback
 const MOCK_EMPLOYEES = [
@@ -767,6 +768,61 @@ export const calculateSalaryProjection = (baseSalary, summary, totalMonthDays) =
     deductions,
     netPayable,
   };
+};
+
+export const parseSalaryAmount = value =>
+  Number(String(value || '0').replace(/[^0-9.]/g, '')) || 0;
+
+export const buildPayrollMonthlyRecord = (monthKey, item, totalMonthDays) => {
+  const summary = item.summary || {};
+  const baseSalary = parseSalaryAmount(item.employee?.base_salary);
+  const projection = calculateSalaryProjection(baseSalary, summary, totalMonthDays);
+
+  return {
+    employee_id: item.employee.id,
+    month_key: monthKey,
+    employee_name: item.employee.name || null,
+    base_salary: baseSalary,
+    total_days: totalMonthDays,
+    payable_days: projection.payableDays,
+    present_days: summary.present || 0,
+    half_days: summary.halfDay || 0,
+    absent_days: summary.absent || 0,
+    paid_leave_days: summary.paidLeave || 0,
+    unpaid_leave_days: summary.unpaidLeave || 0,
+    sandwich_leave_days: summary.sandwichLeave || 0,
+    weekly_off_days: summary.weeklyOff || 0,
+    daily_rate: projection.dailyRate,
+    gross_pay: projection.grossEarnings,
+    deductions: projection.deductions,
+    net_pay: projection.netPayable,
+    attendance_summary: {
+      summary,
+      calculated_at: new Date().toISOString(),
+    },
+  };
+};
+
+export const savePayrollMonthlySnapshot = async (monthKey, employees = []) => {
+  if (!isSupabaseConfigured || !monthKey || employees.length === 0) {
+    return { saved: 0 };
+  }
+
+  const [year, month] = monthKey.split('-').map(Number);
+  const totalMonthDays = getDaysInMonth(year, month);
+  const rows = employees.map(item =>
+    buildPayrollMonthlyRecord(monthKey, item, totalMonthDays),
+  );
+
+  const { error } = await getSupabase()
+    .from(EMPLOYEE_PAYROLL_MONTHLY_TABLE)
+    .upsert(rows, { onConflict: 'employee_id,month_key' });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to save payroll monthly snapshot');
+  }
+
+  return { saved: rows.length };
 };
 
 // Normalize department names to group typo variations under single standardized labels
