@@ -91,17 +91,31 @@ const SHIFT_START_HOUR = 4; // 04:00 AM
 const SHIFT_END_HOUR = 27; // 03:00 AM next day
 const TOTAL_SHIFT_MS = (SHIFT_END_HOUR - SHIFT_START_HOUR) * 60 * 60 * 1000;
 
+const MEETING_COLOR = '#9B59B6';
+const WORKING_COLOR = '#3498DB';
+const BREAK_COLOR = '#F5C542';
+const IDLE_COLOR = '#F85149';
+
+const isMeetingSegment = (kind, label = '') => {
+  const kindNorm = String(kind || '').toLowerCase();
+  const labelNorm = String(label || '').toLowerCase();
+  return (
+    kindNorm === 'meeting' ||
+    (kindNorm === 'break' && labelNorm.includes('meeting'))
+  );
+};
+
 const getSegmentColor = (kind, label = '') => {
-  if (kind === 'meeting' || (kind === 'break' && String(label).toLowerCase().includes('meeting'))) {
-    return '#9B59B6';
+  if (isMeetingSegment(kind, label)) {
+    return MEETING_COLOR;
   }
-  switch (kind) {
+  switch (String(kind || '').toLowerCase()) {
     case 'idle':
-      return '#F85149';
+      return IDLE_COLOR;
     case 'break':
-      return '#F5C542';
+      return BREAK_COLOR;
     case 'working':
-      return '#3498DB';
+      return WORKING_COLOR;
     default:
       return '#8B949E';
   }
@@ -497,7 +511,14 @@ const DashboardScreen = () => {
 
     let workMs = 0;
     (myShiftSession.segments || []).forEach(seg => {
-      if (seg.kind !== 'working') return;
+      if (seg.kind !== 'working' && seg.kind !== 'meeting') {
+        const isMeetingLabel =
+          seg.kind === 'break' &&
+          String(seg.label || '')
+            .toLowerCase()
+            .includes('meeting');
+        if (!isMeetingLabel) return;
+      }
       const start = new Date(seg.started_at).getTime();
       const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
       workMs += Math.max(0, end - start);
@@ -741,10 +762,10 @@ const DashboardScreen = () => {
       }
 
       (session.segments || []).forEach(seg => {
-        if (seg.kind === 'working') {
-          const start = new Date(seg.started_at).getTime();
-          const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
-          totalWorkMs += (end - start);
+        const start = new Date(seg.started_at).getTime();
+        const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
+        if (seg.kind === 'working' || isMeetingSegment(seg.kind, seg.label)) {
+          totalWorkMs += end - start;
         }
       });
     });
@@ -1013,19 +1034,19 @@ const DashboardScreen = () => {
 
               <View style={styles.timelineLegendRow}>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#3498DB' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: WORKING_COLOR }]} />
                   <Text style={styles.legendText}>Working</Text>
                 </View>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#9B59B6' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: MEETING_COLOR }]} />
                   <Text style={styles.legendText}>Meeting</Text>
                 </View>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#F5C542' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: BREAK_COLOR }]} />
                   <Text style={styles.legendText}>Break</Text>
                 </View>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: '#F85149' }]} />
+                  <View style={[styles.legendDot, { backgroundColor: IDLE_COLOR }]} />
                   <Text style={styles.legendText}>Idle</Text>
                 </View>
               </View>
@@ -1088,10 +1109,16 @@ const DashboardScreen = () => {
                   {shiftSessions.slice(0, 3).map(session => {
                     let workMs = 0;
                     (session.segments || []).forEach(seg => {
-                      if (seg.kind === 'working') {
-                        const start = new Date(seg.started_at).getTime();
-                        const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
-                        workMs += (end - start);
+                      const start = new Date(seg.started_at).getTime();
+                      const end = seg.ended_at ? new Date(seg.ended_at).getTime() : Date.now();
+                      const isMeeting =
+                        seg.kind === 'meeting' ||
+                        (seg.kind === 'break' &&
+                          String(seg.label || '')
+                            .toLowerCase()
+                            .includes('meeting'));
+                      if (seg.kind === 'working' || isMeeting) {
+                        workMs += end - start;
                       }
                     });
                     

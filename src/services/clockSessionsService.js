@@ -280,11 +280,17 @@ const groupSessionsByDate = sessions => {
   return grouped;
 };
 
-const isWorkingSegment = seg => {
+const isOfficeHoursSegment = seg => {
   if (!seg) return false;
-  if (seg.kind === 'working') return true;
-  if (seg.kind === 'idle' || seg.kind === 'break' || seg.kind === 'meeting') {
-    return false;
+  if (seg.kind === 'working' || seg.kind === 'meeting') return true;
+  // Breaks labeled as meeting also count as meeting time
+  if (
+    seg.kind === 'break' &&
+    String(seg.label || '')
+      .toLowerCase()
+      .includes('meeting')
+  ) {
+    return true;
   }
   return false;
 };
@@ -293,7 +299,7 @@ const sumWorkingHoursFromSegments = (segments, nowMs = Date.now()) => {
   let totalMs = 0;
 
   (segments || []).forEach(seg => {
-    if (!isWorkingSegment(seg) || !seg.started_at) {
+    if (!isOfficeHoursSegment(seg) || !seg.started_at) {
       return;
     }
     const start = new Date(seg.started_at).getTime();

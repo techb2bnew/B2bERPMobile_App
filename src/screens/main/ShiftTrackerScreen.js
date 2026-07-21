@@ -121,14 +121,31 @@ const MOCK_EMPLOYEES = [
   { id: 'emp-7', name: 'Saurabh Bhatia', dept: 'Management' },
 ];
 
-const getSegmentColor = (kind) => {
-  switch (kind) {
+const MEETING_COLOR = '#9B59B6';
+const WORKING_COLOR = '#3498DB';
+const BREAK_COLOR = '#F5C542';
+const IDLE_COLOR = '#F85149';
+
+const isMeetingSegment = (kind, label = '') => {
+  const kindNorm = String(kind || '').toLowerCase();
+  const labelNorm = String(label || '').toLowerCase();
+  return (
+    kindNorm === 'meeting' ||
+    (kindNorm === 'break' && labelNorm.includes('meeting'))
+  );
+};
+
+const getSegmentColor = (kind, label = '') => {
+  if (isMeetingSegment(kind, label)) {
+    return MEETING_COLOR;
+  }
+  switch (String(kind || '').toLowerCase()) {
     case 'idle':
-      return '#F85149'; // Red
+      return IDLE_COLOR;
     case 'break':
-      return '#F5C542'; // Yellow
+      return BREAK_COLOR;
     case 'working':
-      return '#3498DB'; // Light Blue
+      return WORKING_COLOR;
     default:
       return '#8B949E';
   }
@@ -741,10 +758,7 @@ const ShiftTrackerScreen = () => {
         else label = seg.kind;
       }
 
-      let dotColor = getSegmentColor(seg.kind);
-      if (seg.kind === 'break' && label.toLowerCase().includes('meeting')) {
-        dotColor = '#9B59B6';
-      }
+      let dotColor = getSegmentColor(seg.kind, seg.label);
 
       items.push({
         type: 'segment',
@@ -1530,7 +1544,7 @@ const ShiftTrackerScreen = () => {
                 {
                   left: `${leftPercent}%`,
                   width: `${widthPercent}%`,
-                  backgroundColor: getSegmentColor(seg.kind),
+                  backgroundColor: getSegmentColor(seg.kind, seg.label),
                 },
               ]}
             />
@@ -1579,13 +1593,13 @@ const ShiftTrackerScreen = () => {
       }
     }
 
-    // Working hours math
+    // Working + meeting hours (office time shown on card)
     let workingMs = 0;
     (session.segments || []).forEach(seg => {
       const start = new Date(seg.started_at).getTime();
       const end = seg.ended_at ? new Date(seg.ended_at).getTime() : referenceTime;
       const duration = end - start;
-      if (seg.kind === 'working') {
+      if (seg.kind === 'working' || isMeetingSegment(seg.kind, seg.label)) {
         workingMs += duration;
       }
     });
@@ -1703,7 +1717,7 @@ const ShiftTrackerScreen = () => {
               <Text style={styles.workingHoursValue}>
                 {session.status === 'offline' || workingMs === 0 ? '-' : formatDuration(workingMs)}
               </Text>
-              <Text style={styles.prodLabel}>Work Time</Text>
+              <Text style={styles.prodLabel}>Work + Meet</Text>
             </View>
           </View>
 
@@ -2080,7 +2094,7 @@ const ShiftTrackerScreen = () => {
                           <View style={styles.liveItemTexts}>
                             <Text style={styles.liveItemLabel}>Active for</Text>
                             <Text style={[styles.liveItemValue, { color: '#3DDC84' }]} numberOfLines={1}>
-                              {sessionStats?.workTime}
+                              {formatDuration((sessionStats?.workMs || 0) + (sessionStats?.meetingMs || 0))}
                             </Text>
                           </View>
                         </View>
@@ -2096,9 +2110,9 @@ const ShiftTrackerScreen = () => {
                         <View style={styles.liveItem}>
                           <Icon name="zap" size={wp(3.8)} color="#3498DB" />
                           <View style={styles.liveItemTexts}>
-                            <Text style={styles.liveItemLabel}>Work Time</Text>
+                            <Text style={styles.liveItemLabel}>Work + Meet</Text>
                             <Text style={[styles.liveItemValue, { color: '#3498DB' }]} numberOfLines={1}>
-                              {sessionStats?.workTime}
+                              {formatDuration((sessionStats?.workMs || 0) + (sessionStats?.meetingMs || 0))}
                             </Text>
                           </View>
                         </View>
@@ -2147,19 +2161,19 @@ const ShiftTrackerScreen = () => {
 
                     <View style={styles.legendContainer}>
                       <View style={styles.legendItem}>
-                        <View style={[styles.legendDot, { backgroundColor: '#3498DB' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: WORKING_COLOR }]} />
                         <Text style={styles.legendText}>Working</Text>
                       </View>
                       <View style={styles.legendItem}>
-                        <View style={[styles.legendDot, { backgroundColor: '#9B59B6' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: MEETING_COLOR }]} />
                         <Text style={styles.legendText}>Meeting</Text>
                       </View>
                       <View style={styles.legendItem}>
-                        <View style={[styles.legendDot, { backgroundColor: '#F5C542' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: BREAK_COLOR }]} />
                         <Text style={styles.legendText}>Break</Text>
                       </View>
                       <View style={styles.legendItem}>
-                        <View style={[styles.legendDot, { backgroundColor: '#F85149' }]} />
+                        <View style={[styles.legendDot, { backgroundColor: IDLE_COLOR }]} />
                         <Text style={styles.legendText}>Idle</Text>
                       </View>
                     </View>

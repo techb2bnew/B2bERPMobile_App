@@ -42,6 +42,8 @@
 	<string>Camera is used to take photos for chat messages.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used to verify you are at the office before starting your attendance timer.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Location is used to verify office attendance while you are clocked in and to confirm you are at the office before starting your shift.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Photos and videos are used to share media in chat.</string>
 	<key>RCTNewArchEnabled</key>
