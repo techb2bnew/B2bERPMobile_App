@@ -355,3 +355,99 @@ export const CALL_EMPLOYEE_LOADING = 'Loading employees...';
 export const CALL_EMPLOYEE_EMPTY = 'No employees found';
 export const CALL_EMPLOYEE_LOAD_ERROR = 'Unable to load employees';
 export const CALL_EMPLOYEE_DIALER_ERROR = 'Phone dialer is not available';
+
+// ---------------------------------------------------------------------------
+// Meeting & Schedule module
+// ---------------------------------------------------------------------------
+export const MEETINGS_LABEL = 'Meetings';
+export const MEETINGS_TITLE = 'Meetings & Schedule';
+export const MEETINGS_NEW_BUTTON = 'New Meeting';
+export const MEETINGS_SEARCH_PLACEHOLDER = 'Search meetings, participants...';
+
+export const MEETING_TAB_TODAY = 'Today';
+export const MEETING_TAB_UPCOMING = 'Upcoming';
+export const MEETING_TAB_ONGOING = 'Ongoing';
+export const MEETING_TAB_COMPLETED = 'Completed';
+
+export const MEETING_VIEW_LIST = 'List';
+export const MEETING_VIEW_CALENDAR = 'Calendar';
+export const MEETING_VIEW_BOARD = 'Board';
+
+export const MEETING_CALENDAR_DAY = 'Day';
+export const MEETING_CALENDAR_WEEK = 'Week';
+export const MEETING_CALENDAR_MONTH = 'Month';
+
+export const MEETING_DRAG_HINT_WEEK = 'Long-press a meeting to drag it to another day';
+export const MEETING_DRAG_HINT_DAY = 'Long-press a meeting to drag it to another time slot';
+export const MEETING_DRAG_HINT_BOARD = 'Long-press a meeting and drag it to another column to change its status';
+
+export const MEETING_STATUS_SCHEDULED = 'Scheduled';
+export const MEETING_STATUS_ONGOING = 'Ongoing';
+export const MEETING_STATUS_COMPLETED = 'Completed';
+export const MEETING_STATUS_CANCELLED = 'Cancelled';
+
+export const MEETING_EMPTY_TODAY = 'No meetings scheduled for today.';
+export const MEETING_EMPTY_UPCOMING = 'No upcoming meetings.';
+export const MEETING_EMPTY_ONGOING = 'No meetings in progress right now.';
+export const MEETING_EMPTY_COMPLETED = 'No completed meetings yet.';
+export const MEETING_EMPTY_SEARCH = 'No meetings match your search or filters.';
+
+export const MEETING_JOIN_BUTTON = 'Join Meeting';
+export const MEETING_STARTING_SOON_PREFIX = 'Starting in';
+export const MEETING_LIVE_NOW = 'Live now';
+
+export const MEETING_REMINDER_TITLE = 'Coming up';
+export const MEETING_REMINDER_STARTS_IN = 'starts in';
+export const MEETING_REMINDER_MINUTES_SUFFIX = 'min';
+
+export const MEETING_NEW_TITLE = 'Schedule Meeting';
+export const MEETING_EDIT_TITLE = 'Edit Meeting';
+export const MEETING_TITLE_LABEL = 'Meeting Title';
+export const MEETING_TITLE_PLACEHOLDER = 'e.g. Sprint Planning';
+export const MEETING_TYPE_LABEL = 'Meeting Type';
+export const MEETING_PLATFORM_LABEL = 'Platform';
+export const MEETING_LINK_LABEL = 'Meeting Link';
+export const MEETING_LINK_PLACEHOLDER = 'https://zoom.us/j/...';
+export const MEETING_LINK_COPIED_TITLE = 'Copied';
+export const MEETING_LINK_COPIED_MESSAGE = 'Meeting link copied to clipboard.';
+export const MEETING_DATE_LABEL = 'Meeting Date';
+export const MEETING_SELECT_DATE = 'Select date';
+export const MEETING_START_TIME_LABEL = 'Start Time';
+export const MEETING_DURATION_LABEL = 'Duration';
+export const MEETING_END_TIME_LABEL = 'Ends at';
+export const MEETING_PARTICIPANTS_LABEL = 'Participants';
+export const MEETING_SELECT_PARTICIPANTS_PLACEHOLDER = 'Select participants';
+export const MEETING_PARTICIPANTS_REQUIRED = 'Please select at least one participant.';
+export const MEETING_AGENDA_LABEL = 'Agenda / Description';
+export const MEETING_AGENDA_PLACEHOLDER = 'What will this meeting cover?';
+export const MEETING_SAVE_BUTTON = 'Schedule Meeting';
+export const MEETING_UPDATE_BUTTON = 'Update Meeting';
+export const MEETING_TITLE_REQUIRED = 'Please enter a meeting title.';
+export const MEETING_DATE_REQUIRED = 'Please select a meeting date.';
+export const MEETING_LINK_REQUIRED = 'Please add a meeting link for this platform.';
+
+export const MEETING_DETAIL_TITLE = 'Meeting Details';
+export const MEETING_EDIT_ACTION = 'Edit';
+export const MEETING_CANCEL_ACTION = 'Cancel Meeting';
+export const MEETING_CANCEL_CONFIRM_TITLE = 'Cancel Meeting';
+export const MEETING_CANCEL_CONFIRM_MESSAGE =
+  'Are you sure you want to cancel this meeting? Participants will need to be informed separately.';
+export const MEETING_CANCEL_CONFIRM_YES = 'Yes, Cancel';
+export const MEETING_CANCEL_CONFIRM_NO = 'Keep Meeting';
+
+export const MEETING_FILTER_TITLE = 'Filter Meetings';
+export const MEETING_FILTER_SEARCH_LABEL = 'Search';
+export const MEETING_FILTER_SEARCH_PLACEHOLDER = 'Title, participant...';
+export const MEETING_FILTER_STATUS_LABEL = 'Status';
+export const MEETING_FILTER_TYPE_LABEL = 'Meeting Type';
+export const MEETING_FILTER_PLATFORM_LABEL = 'Platform';
+export const MEETING_FILTER_DATE_LABEL = 'Date Range';
+export const MEETING_FILTER_ALL = 'All';
+export const MEETING_FILTER_DATE_TODAY = 'Today';
+export const MEETING_FILTER_DATE_WEEK = 'This Week';
+export const MEETING_FILTER_DATE_ALL = 'All dates';
+export const MEETING_FILTER_CLEAR_ALL = 'Clear all';
+export const MEETING_FILTER_APPLY = 'Apply Filters';
+
+export const MEETING_ORGANIZER_LABEL = 'Organizer';
+export const MEETING_AGENDA_EMPTY = 'No agenda added.';

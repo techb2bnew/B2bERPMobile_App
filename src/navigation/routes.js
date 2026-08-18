@@ -12,6 +12,7 @@ export const MAIN_ROUTES = {
   PROJECTS_WORK: 'ProjectsWork',
   TASK_MANAGEMENT: 'TaskManagement',
   TIME_SHEET: 'TimeSheet',
+  TIME_REPORT: 'TimeReport',
   CHAT: 'Chat',
   CHANNEL_CHAT: 'ChannelChat',
   PROFILE: 'Profile',
@@ -23,4 +24,5 @@ export const MAIN_ROUTES = {
   ATS_JOBS: 'AtsJobs',
   ATS_PIPELINE: 'AtsPipeline',
   PAYROLL_ADMIN: 'PayrollAdmin',
+  MEETINGS: 'Meetings',
 };

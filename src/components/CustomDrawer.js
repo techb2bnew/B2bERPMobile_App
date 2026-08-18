@@ -32,6 +32,7 @@ import {
   PROJECTS_WORK_LABEL,
   ONLINE_STATUS,
   TIME_SHEET_LABEL,
+  MEETINGS_LABEL,
 } from '../constants/Constants';
 import {
   darkBackgroundColor,
@@ -65,6 +66,7 @@ const MENU_ITEMS = [
   { route: MAIN_ROUTES.PROJECTS_WORK, label: PROJECTS_WORK_LABEL, icon: 'folder' },
   { route: MAIN_ROUTES.TIME_SHEET, label: TIME_SHEET_LABEL, icon: 'clock' },
   { route: MAIN_ROUTES.CHAT, label: CHAT_LABEL, icon: 'message-circle' },
+  { route: MAIN_ROUTES.MEETINGS, label: MEETINGS_LABEL, icon: 'video' },
   { route: MAIN_ROUTES.PROFILE, label: PROFILE_TITLE, icon: 'user' },
 ];
 
@@ -76,6 +78,7 @@ const CustomDrawer = () => {
   const canShowLeaves = isEmployeeUser(user) || isTeamLeaderUser(user) || isCeoAdminUser(user) || isHrManagerUser(user);
   const isCeo = isCeoAdminUser(user) || isHrManagerUser(user);
   const canShowShiftTracker = isTeamLeaderUser(user) || isCeoAdminUser(user) || isHrManagerUser(user);
+  const canShowTimeReport = isTeamLeaderUser(user) || isCeoAdminUser(user);
   const canShowHrms = isCeoAdminUser(user) || isHrManagerUser(user);
 
   const menuItems = useMemo(() => {
@@ -171,8 +174,24 @@ const CustomDrawer = () => {
         });
       }
     }
+    if (canShowTimeReport) {
+      const profileIndex = items.findIndex(item => item.route === MAIN_ROUTES.PROFILE);
+      if (profileIndex !== -1) {
+        items.splice(profileIndex, 0, {
+          route: MAIN_ROUTES.TIME_REPORT,
+          label: 'Time Report',
+          icon: 'bar-chart-2',
+        });
+      } else {
+        items.push({
+          route: MAIN_ROUTES.TIME_REPORT,
+          label: 'Time Report',
+          icon: 'bar-chart-2',
+        });
+      }
+    }
     return items;
-  }, [canShowLeaves, isCeo, canShowShiftTracker, canShowHrms]);
+  }, [canShowLeaves, isCeo, canShowShiftTracker, canShowTimeReport, canShowHrms]);
 
   const drawerWidth = getDrawerWidth();
   const slideAnim = useRef(new Animated.Value(-drawerWidth)).current;

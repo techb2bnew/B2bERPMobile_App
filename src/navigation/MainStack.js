@@ -12,6 +12,7 @@ import ProjectsWorkScreen from '../screens/main/ProjectsWorkScreen';
 import TaskManagementScreen from '../screens/main/TaskManagementScreen';
 import NotificationsScreen from '../screens/main/NotificationsScreen';
 import TimeSheetScreen from '../screens/main/TimeSheetScreen';
+import TimeReportScreen from '../screens/main/TimeReportScreen';
 import ProfileScreen from '../screens/main/ProfileScreen';
 import ApplyLeaveScreen from '../screens/main/ApplyLeaveScreen';
 import ShiftTrackerScreen from '../screens/main/ShiftTrackerScreen';
@@ -21,6 +22,7 @@ import RecruiterDashboardScreen from '../screens/main/RecruiterDashboardScreen';
 import AtsJobsScreen from '../screens/main/AtsJobsScreen';
 import AtsPipelineScreen from '../screens/main/AtsPipelineScreen';
 import PayrollAdminScreen from '../screens/main/PayrollAdminScreen';
+import MeetingScreen from '../screens/main/MeetingScreen';
 import { MAIN_ROUTES } from './routes';
 
 const Stack = createNativeStackNavigator();
@@ -66,6 +68,11 @@ const MainStackNavigator = () => {
           name={MAIN_ROUTES.TIME_SHEET}
           component={TimeSheetScreen}
           listeners={focusListener(MAIN_ROUTES.TIME_SHEET, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.TIME_REPORT}
+          component={TimeReportScreen}
+          listeners={focusListener(MAIN_ROUTES.TIME_REPORT, setActiveRoute)}
         />
         <Stack.Screen
           name={MAIN_ROUTES.CHAT}
@@ -121,6 +128,11 @@ const MainStackNavigator = () => {
           name={MAIN_ROUTES.PAYROLL_ADMIN}
           component={PayrollAdminScreen}
           listeners={focusListener(MAIN_ROUTES.PAYROLL_ADMIN, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.MEETINGS}
+          component={MeetingScreen}
+          listeners={focusListener(MAIN_ROUTES.MEETINGS, setActiveRoute)}
         />
       </Stack.Navigator>
       <CustomDrawer />
