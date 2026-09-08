@@ -307,6 +307,26 @@ export const TIME_SHEET_CLOCK_OUT_LABEL = 'Clock Out';
 export const TIME_SHEET_HOURS_LABEL = 'Hours';
 export const WEEKLY_HOURS_TITLE = 'Weekly Hours';
 
+// ---------------------------------------------------------------------------
+// KPI / Performance module
+// ---------------------------------------------------------------------------
+export const PERFORMANCE_LABEL = 'KPI/Performance';
+export const PERFORMANCE_TITLE = 'Performance';
+export const PERFORMANCE_SUBTITLE = 'Attendance · Task Completion · Shift Completed';
+export const PERFORMANCE_ATTENDANCE_LABEL = 'Attendance';
+export const PERFORMANCE_TASK_LABEL = 'Task Completion';
+export const PERFORMANCE_SHIFT_LABEL = 'Shift Time';
+export const PERFORMANCE_SEARCH_PLACEHOLDER = 'Search employee...';
+export const PERFORMANCE_TEAM_SUFFIX = 'team';
+export const PERFORMANCE_EMPTY_TEAM = 'No employees to show for this period.';
+export const PERFORMANCE_EMPTY_SEARCH = 'No employees match your search.';
+export const PERFORMANCE_NO_TASKS_CAPTION = 'No tasks due this month';
+export const PERFORMANCE_NO_SHIFT_CAPTION = 'No clock-ins this month';
+export const PERFORMANCE_BACK = 'Back';
+export const PERFORMANCE_PAYABLE_DAYS_SUFFIX = 'days payable';
+export const PERFORMANCE_DONE_SUFFIX = 'done';
+export const PERFORMANCE_PROFILE_NOT_FOUND = 'Your employee profile was not found. Contact HR.';
+
 export const LOGOUT_TEXT = 'Logout';
 export const LOGOUT_CONFIRM_TITLE = 'Logout';
 export const LOGOUT_CONFIRM_MESSAGE = 'Are you sure you want to logout?';

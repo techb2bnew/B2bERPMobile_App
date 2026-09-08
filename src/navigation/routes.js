@@ -25,4 +25,5 @@ export const MAIN_ROUTES = {
   ATS_PIPELINE: 'AtsPipeline',
   PAYROLL_ADMIN: 'PayrollAdmin',
   MEETINGS: 'Meetings',
+  PERFORMANCE: 'Performance',
 };

@@ -321,6 +321,23 @@ export const fetchProjectTasksForProject = async projectId => {
   return data || [];
 };
 
+// Org-wide, unfiltered — used by the KPI/Performance screen to compute each
+// employee's task-completion metric in one query instead of one fetch per
+// employee (fetchTasksForAssignee already re-fetches the whole table under
+// the hood per call, so this avoids doing that N times for a team/company view).
+export const fetchAllProjectTasks = async () => {
+  const { data, error } = await getSupabase()
+    .from(PROJECT_TASKS_TABLE)
+    .select('*')
+    .order('updated_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+};
+
 const buildTaskUpdateRow = (task, { assigneeIds } = {}) => {
   const estimated = task.estimatedHours
     ? `${String(task.estimatedHours).replace(/h$/i, '')}h`

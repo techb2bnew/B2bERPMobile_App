@@ -23,6 +23,7 @@ import AtsJobsScreen from '../screens/main/AtsJobsScreen';
 import AtsPipelineScreen from '../screens/main/AtsPipelineScreen';
 import PayrollAdminScreen from '../screens/main/PayrollAdminScreen';
 import MeetingScreen from '../screens/main/MeetingScreen';
+import PerformanceScreen from '../screens/main/PerformanceScreen';
 import { MAIN_ROUTES } from './routes';
 
 const Stack = createNativeStackNavigator();
@@ -133,6 +134,11 @@ const MainStackNavigator = () => {
           name={MAIN_ROUTES.MEETINGS}
           component={MeetingScreen}
           listeners={focusListener(MAIN_ROUTES.MEETINGS, setActiveRoute)}
+        />
+        <Stack.Screen
+          name={MAIN_ROUTES.PERFORMANCE}
+          component={PerformanceScreen}
+          listeners={focusListener(MAIN_ROUTES.PERFORMANCE, setActiveRoute)}
         />
       </Stack.Navigator>
       <CustomDrawer />

@@ -33,6 +33,7 @@ import {
   ONLINE_STATUS,
   TIME_SHEET_LABEL,
   MEETINGS_LABEL,
+  PERFORMANCE_LABEL,
 } from '../constants/Constants';
 import {
   darkBackgroundColor,
@@ -67,6 +68,7 @@ const MENU_ITEMS = [
   { route: MAIN_ROUTES.TIME_SHEET, label: TIME_SHEET_LABEL, icon: 'clock' },
   { route: MAIN_ROUTES.CHAT, label: CHAT_LABEL, icon: 'message-circle' },
   { route: MAIN_ROUTES.MEETINGS, label: MEETINGS_LABEL, icon: 'video' },
+  { route: MAIN_ROUTES.PERFORMANCE, label: PERFORMANCE_LABEL, icon: 'trending-up' },
   { route: MAIN_ROUTES.PROFILE, label: PROFILE_TITLE, icon: 'user' },
 ];
 
