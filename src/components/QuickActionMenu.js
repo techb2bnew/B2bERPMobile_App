@@ -12,6 +12,7 @@ import {
   QUICK_ACTION_BROADCAST_MESSAGE,
   QUICK_ACTION_CALL_EMPLOYEE,
   QUICK_ACTION_CABIN_ALERT,
+  COPILOT_LABEL,
 } from '../constants/Constants';
 import {
   darkBorderColor,
@@ -55,6 +56,14 @@ const APPLY_LEAVE_ITEM = {
   onPressKey: 'onApplyLeave',
 };
 
+const COPILOT_ITEM = {
+  id: 'copilot',
+  label: COPILOT_LABEL,
+  icon: 'cpu',
+  iconColor: '#6366F1',
+  onPressKey: 'onCopilot',
+};
+
 const QuickActionMenu = ({
   visible,
   onClose,
@@ -62,8 +71,10 @@ const QuickActionMenu = ({
   onBroadcastMessage,
   onCabinAlert,
   onApplyLeave,
+  onCopilot,
   showCabinAlert = false,
   showApplyLeave = false,
+  showCopilot = false,
   badgeCount = 4,
 }) => {
   const handlers = {
@@ -71,9 +82,11 @@ const QuickActionMenu = ({
     onBroadcastMessage,
     onCabinAlert,
     onApplyLeave,
+    onCopilot,
   };
 
   const menuItems = [
+    ...(showCopilot ? [COPILOT_ITEM] : []),
     MENU_ITEMS[0],
     ...(showCabinAlert ? [CABIN_ALERT_ITEM] : []),
     ...(showApplyLeave ? [APPLY_LEAVE_ITEM] : []),

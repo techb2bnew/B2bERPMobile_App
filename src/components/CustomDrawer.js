@@ -34,6 +34,8 @@ import {
   TIME_SHEET_LABEL,
   MEETINGS_LABEL,
   PERFORMANCE_LABEL,
+  COPILOT_LABEL,
+  MY_PAYROLL_LABEL,
 } from '../constants/Constants';
 import {
   darkBackgroundColor,
@@ -82,6 +84,9 @@ const CustomDrawer = () => {
   const canShowShiftTracker = isTeamLeaderUser(user) || isCeoAdminUser(user) || isHrManagerUser(user);
   const canShowTimeReport = isTeamLeaderUser(user) || isCeoAdminUser(user);
   const canShowHrms = isCeoAdminUser(user) || isHrManagerUser(user);
+  const canShowCopilot = isCeoAdminUser(user) || isHrManagerUser(user);
+  const canShowMyPayroll =
+    isEmployeeUser(user) || isTeamLeaderUser(user) || isHrManagerUser(user);
 
   const menuItems = useMemo(() => {
     let items = [...MENU_ITEMS];
@@ -192,8 +197,34 @@ const CustomDrawer = () => {
         });
       }
     }
+    if (canShowMyPayroll) {
+      const profileIndex = items.findIndex(item => item.route === MAIN_ROUTES.PROFILE);
+      const myPayrollItem = {
+        route: MAIN_ROUTES.MY_PAYROLL,
+        label: MY_PAYROLL_LABEL,
+        icon: 'credit-card',
+      };
+      if (profileIndex !== -1) {
+        items.splice(profileIndex, 0, myPayrollItem);
+      } else {
+        items.push(myPayrollItem);
+      }
+    }
+    if (canShowCopilot) {
+      const profileIndex = items.findIndex(item => item.route === MAIN_ROUTES.PROFILE);
+      const copilotItem = {
+        route: MAIN_ROUTES.AI_COPILOT,
+        label: COPILOT_LABEL,
+        icon: 'cpu',
+      };
+      if (profileIndex !== -1) {
+        items.splice(profileIndex, 0, copilotItem);
+      } else {
+        items.push(copilotItem);
+      }
+    }
     return items;
-  }, [canShowLeaves, isCeo, canShowShiftTracker, canShowTimeReport, canShowHrms]);
+  }, [canShowLeaves, isCeo, canShowShiftTracker, canShowTimeReport, canShowHrms, canShowCopilot, canShowMyPayroll]);
 
   const drawerWidth = getDrawerWidth();
   const slideAnim = useRef(new Animated.Value(-drawerWidth)).current;

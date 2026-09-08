@@ -7,7 +7,13 @@ import CabinAlertModal from './Modal/CabinAlertModal';
 import QuickActionMenu from './QuickActionMenu';
 import { MAIN_ROUTES } from '../navigation/routes';
 import { useAuth } from '../context/AuthContext';
-import { isEmployeeUser, isReviewerUser, isTeamLeaderUser } from '../constants/roles';
+import {
+  isCeoAdminUser,
+  isEmployeeUser,
+  isHrManagerUser,
+  isReviewerUser,
+  isTeamLeaderUser,
+} from '../constants/roles';
 
 const AiAssistant = ({ badgeCount = 4 }) => {
   const navigation = useNavigation();
@@ -23,6 +29,10 @@ const AiAssistant = ({ badgeCount = 4 }) => {
   const showApplyLeave = useMemo(() => {
     const canApply = isEmployeeUser(user) || isTeamLeaderUser(user);
     return canApply && route.name !== MAIN_ROUTES.APPLY_LEAVE;
+  }, [user, route.name]);
+  const showCopilot = useMemo(() => {
+    const canUseCopilot = isCeoAdminUser(user) || isHrManagerUser(user);
+    return canUseCopilot && route.name !== MAIN_ROUTES.AI_COPILOT;
   }, [user, route.name]);
 
   const handleFabPress = () => {
@@ -49,6 +59,11 @@ const AiAssistant = ({ badgeCount = 4 }) => {
     navigation.navigate(MAIN_ROUTES.APPLY_LEAVE);
   };
 
+  const handleCopilot = () => {
+    setMenuVisible(false);
+    navigation.navigate(MAIN_ROUTES.AI_COPILOT);
+  };
+
   return (
     <>
       {!menuVisible ? (
@@ -62,8 +77,10 @@ const AiAssistant = ({ badgeCount = 4 }) => {
         onBroadcastMessage={handleBroadcastMessage}
         onCabinAlert={handleCabinAlert}
         onApplyLeave={handleApplyLeave}
+        onCopilot={handleCopilot}
         showCabinAlert={showCabinAlert}
         showApplyLeave={showApplyLeave}
+        showCopilot={showCopilot}
         badgeCount={badgeCount}
       />
 

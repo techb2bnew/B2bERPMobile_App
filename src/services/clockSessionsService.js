@@ -396,6 +396,305 @@ export const saveDailyClockSession = async ({
   return data.id;
 };
 
+/* ------------------------------------------------------------------ *
+ * Clock In / Break / Resume / End Day — exact parity with the admin web
+ * app's (ERP-BASE2BRAND) `clockInEmployee` / `clockOutEmployee`.
+ *
+ * These write `clock_session_segments` alongside `clock_sessions`, because
+ * the admin Shift Tracker timeline and its "On Break" badge are built purely
+ * from segments. The older `saveDailyClockSession` wrote only clock_sessions,
+ * which is why a mobile clock-in showed up in admin with no timeline.
+ * ------------------------------------------------------------------ */
+
+/** Break reason -> segment kind + label (mirrors the admin CLOCK_OUT_OPTIONS). */
+export const CLOCK_BREAK_REASONS = [
+  { id: 'lunch', label: 'Lunch Break', desc: 'Going for lunch', kind: 'break' },
+  { id: 'tea', label: 'Tea / Short Break', desc: 'Quick break', kind: 'break' },
+  {
+    id: 'personal',
+    label: 'Personal / Urgent work',
+    desc: 'Stepped out for something',
+    kind: 'break',
+  },
+  {
+    id: 'meeting',
+    label: 'Meeting / Outside',
+    desc: 'Client or outside meeting',
+    kind: 'meeting',
+  },
+  { id: 'end_day', label: 'End Day', desc: 'Leaving office for today', kind: null },
+];
+
+const WORKING_SEGMENT_LABEL = 'Office attendance';
+const MAX_SESSION_HOURS = 12;
+
+const findBreakReason = reasonId =>
+  CLOCK_BREAK_REASONS.find(option => option.id === reasonId) || null;
+
+const segmentKindFromReason = reasonId => {
+  if (reasonId === 'idle') {
+    return 'idle';
+  }
+  return reasonId === 'meeting' ? 'meeting' : 'break';
+};
+
+const segmentLabelFromReason = reasonId => {
+  if (reasonId === 'end_day') {
+    return 'End of day';
+  }
+  if (reasonId === 'idle') {
+    return 'System Idle';
+  }
+  return findBreakReason(reasonId)?.label || String(reasonId);
+};
+
+const sessionNoteFromReason = reasonId => {
+  if (reasonId === 'end_day') {
+    return 'End of day';
+  }
+  const option = findBreakReason(reasonId);
+  return option ? `Break: ${option.label}` : `Break: ${reasonId}`;
+};
+
+/** Mirrors the admin calculateSessionHours — capped at 12 hours, rounded to 4 decimals. */
+const segmentHoursBetween = (startIso, endMs) => {
+  if (!startIso) {
+    return 0;
+  }
+  const elapsedMs = endMs - new Date(startIso).getTime();
+  if (elapsedMs < 1000) {
+    return 0;
+  }
+  const cappedMs = Math.min(elapsedMs, MAX_SESSION_HOURS * 3600000);
+  return Math.round((cappedMs / 3600000) * 10000) / 10000;
+};
+
+const roundHours = value => Math.round(Number(value || 0) * 10000) / 10000;
+
+/** Today's session whatever its status — mirrors the admin fetchTodayOfficeSession. */
+const fetchTodaySessionRow = async (supabase, employeeId) => {
+  const { start, end } = getDayBounds(getLocalDateKey());
+
+  const { data, error } = await supabase
+    .from(CLOCK_SESSIONS_TABLE)
+    .select('*')
+    .eq('employee_id', employeeId)
+    .gte('clock_in', start)
+    .lte('clock_in', end)
+    .order('clock_in', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'Failed to load today clock session');
+  }
+
+  return data || null;
+};
+
+/** Closes any still-open segments (ended_at null). */
+const closeOpenSegments = async (supabase, sessionId, endedAtMs) => {
+  const { data: openSegments, error } = await supabase
+    .from(CLOCK_SESSION_SEGMENTS_TABLE)
+    .select('id, started_at')
+    .eq('session_id', sessionId)
+    .is('ended_at', null);
+
+  if (error || !openSegments?.length) {
+    return;
+  }
+
+  await Promise.all(
+    openSegments.map(segment => {
+      const startMs = new Date(segment.started_at).getTime();
+      const safeEndMs = Math.max(startMs, endedAtMs);
+      return supabase
+        .from(CLOCK_SESSION_SEGMENTS_TABLE)
+        .update({ ended_at: new Date(safeEndMs).toISOString() })
+        .eq('id', segment.id);
+    }),
+  );
+};
+
+const insertSegment = async (supabase, { sessionId, kind, label, startedAtMs }) => {
+  if (!sessionId || !kind) {
+    return;
+  }
+  await supabase.from(CLOCK_SESSION_SEGMENTS_TABLE).insert({
+    session_id: sessionId,
+    kind,
+    label,
+    started_at: new Date(startedAtMs).toISOString(),
+    ended_at: null,
+  });
+};
+
+/**
+ * Clock In / Resume. Reactivates today's session if one exists, otherwise
+ * creates a new one. Either way a fresh `working` segment is opened.
+ */
+export const startClockSession = async ({ employeeId, employeeName }) => {
+  if (!isSupabaseConfigured || !employeeId) {
+    return null;
+  }
+
+  const supabase = getSupabase();
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const todayRow = await fetchTodaySessionRow(supabase, employeeId);
+
+  if (todayRow?.id) {
+    if (todayRow.status === 'active') {
+      return todayRow.id;
+    }
+
+    await closeOpenSegments(supabase, todayRow.id, nowMs);
+
+    const { error } = await supabase
+      .from(CLOCK_SESSIONS_TABLE)
+      .update({
+        status: 'active',
+        session_start: nowIso,
+        clock_out: null,
+        notes: WORKING_SEGMENT_LABEL,
+        employee_name: employeeName,
+      })
+      .eq('id', todayRow.id);
+
+    if (error) {
+      throw new Error(error.message || 'Failed to resume clock session');
+    }
+
+    await insertSegment(supabase, {
+      sessionId: todayRow.id,
+      kind: 'working',
+      label: WORKING_SEGMENT_LABEL,
+      startedAtMs: nowMs,
+    });
+
+    return todayRow.id;
+  }
+
+  const { data, error } = await supabase
+    .from(CLOCK_SESSIONS_TABLE)
+    .insert({
+      employee_id: employeeId,
+      employee_name: employeeName,
+      clock_in: nowIso,
+      session_start: nowIso,
+      clock_out: null,
+      status: 'active',
+      hours: 0,
+      notes: WORKING_SEGMENT_LABEL,
+      project_id: null,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    throw new Error(error.message || 'Failed to start clock session');
+  }
+
+  await insertSegment(supabase, {
+    sessionId: data.id,
+    kind: 'working',
+    label: WORKING_SEGMENT_LABEL,
+    startedAtMs: nowMs,
+  });
+
+  return data.id;
+};
+
+/**
+ * A break (lunch / tea / personal / meeting) or End Day.
+ * A break sets the session to `paused` and opens a break segment.
+ * End Day sets the session to `completed` and opens no new segment.
+ */
+export const stopClockSession = async ({
+  employeeId,
+  employeeName,
+  reasonId = 'end_day',
+  stoppedAt = new Date(),
+}) => {
+  if (!isSupabaseConfigured || !employeeId) {
+    return null;
+  }
+
+  const supabase = getSupabase();
+  const stopMs =
+    stoppedAt instanceof Date ? stoppedAt.getTime() : new Date(stoppedAt).getTime();
+  const stopIso = new Date(stopMs).toISOString();
+  const endDay = reasonId === 'end_day';
+
+  const todayRow = await fetchTodaySessionRow(supabase, employeeId);
+  if (!todayRow?.id) {
+    return null;
+  }
+
+  if (todayRow.status === 'completed') {
+    return todayRow.id;
+  }
+
+  // Only time from an actively running session is added to the total hours.
+  const workedHours =
+    todayRow.status === 'active'
+      ? segmentHoursBetween(todayRow.session_start || todayRow.clock_in, stopMs)
+      : 0;
+  const totalHours = roundHours(Number(todayRow.hours || 0) + workedHours);
+
+  await closeOpenSegments(supabase, todayRow.id, stopMs);
+
+  if (!endDay) {
+    await insertSegment(supabase, {
+      sessionId: todayRow.id,
+      kind: segmentKindFromReason(reasonId),
+      label: segmentLabelFromReason(reasonId),
+      startedAtMs: stopMs,
+    });
+  }
+
+  const { error } = await supabase
+    .from(CLOCK_SESSIONS_TABLE)
+    .update({
+      clock_out: endDay ? stopIso : null,
+      status: endDay ? 'completed' : 'paused',
+      hours: totalHours,
+      session_start: endDay ? null : stopIso,
+      notes: sessionNoteFromReason(reasonId),
+      employee_name: employeeName,
+    })
+    .eq('id', todayRow.id);
+
+  if (error) {
+    throw new Error(error.message || 'Failed to stop clock session');
+  }
+
+  return todayRow.id;
+};
+
+/** Today's live status — used to restore the timer when the app reopens. */
+export const fetchTodayClockSessionState = async employeeId => {
+  if (!isSupabaseConfigured || !employeeId) {
+    return null;
+  }
+
+  const supabase = getSupabase();
+  const row = await fetchTodaySessionRow(supabase, employeeId);
+  if (!row) {
+    return null;
+  }
+
+  return {
+    sessionId: row.id,
+    status: row.status,
+    clockIn: row.clock_in,
+    clockOut: row.clock_out,
+    sessionStart: row.session_start,
+    accumulatedSeconds: Math.max(0, Math.round(Number(row.hours || 0) * 3600)),
+    notes: row.notes,
+  };
+};
+
 export const fetchHoursForEmployeeInRange = async (
   employeeId,
   startDateKey,

@@ -16,7 +16,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import AppHeader from '../../components/AppHeader';
 import UserAvatar from '../../components/UserAvatar';
 import { fetchHrmsMonthlyData, savePayrollMonthlySnapshot } from '../../services/hrmsService';
-import { updateEmployeeProfile, getEmployeeProfileImageUrl } from '../../services/employeeService';
+import { setEmployeeSalary } from '../../services/employeeSalaryService';
+import { getEmployeeProfileImageUrl } from '../../services/employeeService';
 import {
   darkBackgroundColor,
   darkSurfaceColor,
@@ -105,13 +106,23 @@ const PayrollAdminScreen = () => {
   const handleSaveSalary = async (employeeId) => {
     const inputVal = salaryInputs[employeeId];
     if (!inputVal || !inputVal.trim()) return;
+
+    const amount = Number(String(inputVal).replace(/[^0-9.]/g, ''));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      Alert.alert('Payroll', 'Enter a valid monthly salary.');
+      return;
+    }
+
     setSavingSalaryId(employeeId);
     try {
-      await updateEmployeeProfile(employeeId, { salary: `₹${inputVal}` });
+      // Salary lives in the Finance/Invoicing project (`employee_salaries`),
+      // not on employee_profiles — that column does not exist, so the old
+      // updateEmployeeProfile({ salary }) call always failed.
+      await setEmployeeSalary(employeeId, amount);
       setSalaryInputs(prev => ({ ...prev, [employeeId]: '' }));
       loadData();
     } catch (e) {
-      Alert.alert('Error', 'Failed to save base salary');
+      Alert.alert('Error', e?.message || 'Failed to save base salary');
     } finally {
       setSavingSalaryId(null);
     }

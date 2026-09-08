@@ -22,21 +22,17 @@ import {
   CLOCK_OUT_CONFIRM,
   CLOCK_OUT_REASON_SUBTITLE,
   CLOCK_OUT_REASON_TITLE,
-  REASON_END_OF_DAY,
-  REASON_LUNCH_BREAK,
   REASON_MANUAL_LABEL,
   REASON_OTHER_PLACEHOLDER,
-  REASON_PERSONAL,
   REASON_REQUIRED,
 } from '../../constants/Constants';
+import { CLOCK_BREAK_REASONS } from '../../services/clockSessionsService';
 import { style, spacings } from '../../constants/Fonts';
 import { widthPercentageToDP as wp, heightPercentageToDP as hp } from '../../utils';
 
-const REASON_OPTIONS = [
-  { id: 'lunch', label: REASON_LUNCH_BREAK },
-  { id: 'personal', label: REASON_PERSONAL },
-  { id: 'end_of_day', label: REASON_END_OF_DAY },
-];
+// Single source of truth shared with the admin web CLOCK_OUT_OPTIONS — Lunch
+// Break, Tea / Short Break, Personal / Urgent work, Meeting / Outside, End Day.
+const REASON_OPTIONS = CLOCK_BREAK_REASONS;
 
 const ClockOutReasonModal = ({ visible, onConfirm, onCancel }) => {
   const [selectedReasonId, setSelectedReasonId] = useState(null);
@@ -57,7 +53,7 @@ const ClockOutReasonModal = ({ visible, onConfirm, onCancel }) => {
   const handleConfirm = () => {
     const manualReason = customReason.trim();
     const selectedOption = REASON_OPTIONS.find(option => option.id === selectedReasonId);
-    const endDay = selectedReasonId === 'end_of_day';
+    const endDay = selectedReasonId === 'end_day';
 
     let reason = manualReason;
 
@@ -70,12 +66,18 @@ const ClockOutReasonModal = ({ visible, onConfirm, onCancel }) => {
       return;
     }
 
-    if (!endDay && manualReason && selectedOption && selectedReasonId !== 'end_of_day') {
+    if (!endDay && manualReason && selectedOption) {
       reason = `${selectedOption.label}: ${manualReason}`;
     }
 
     resetForm();
-    onConfirm({ reason, endDay });
+    // reasonId decides the segment kind/label written to the database; the
+    // reason text is only for display and the session notes.
+    onConfirm({
+      reason,
+      reasonId: selectedReasonId || 'personal',
+      endDay,
+    });
   };
 
   return (
@@ -97,7 +99,7 @@ const ClockOutReasonModal = ({ visible, onConfirm, onCancel }) => {
                 showsVerticalScrollIndicator={false}>
                 {REASON_OPTIONS.map(option => {
                   const isSelected = selectedReasonId === option.id;
-                  const isEndOfDay = option.id === 'end_of_day';
+                  const isEndOfDay = option.id === 'end_day';
 
                   return (
                     <TouchableOpacity

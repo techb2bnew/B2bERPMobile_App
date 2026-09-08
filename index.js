@@ -2,6 +2,9 @@
  * @format
  */
 
+// bcryptjs (My Payroll PIN) needs crypto.getRandomValues, which React Native
+// only provides through this polyfill. It must load BEFORE bcrypt is imported.
+import 'react-native-get-random-values';
 import 'react-native-url-polyfill/auto';
 import 'react-native-gesture-handler';
 import messaging from '@react-native-firebase/messaging';

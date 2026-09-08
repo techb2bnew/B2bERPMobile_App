@@ -78,6 +78,14 @@ const CEO_PROFILE_ROLES = new Set([
   'admin',
   'administrator',
   'company admin',
+  // In the admin web app Super Admin sits above CEO but mirrors the exact
+  // same nav and access, so it signs in through the "CEO / Admin" tile too.
+  // 'superadmin' = employee_profiles.app_role, 'super admin' = designation.
+  'superadmin',
+  'super admin',
+  'super_admin',
+  'super administrator',
+  'superadministrator',
 ]);
 
 const HR_MANAGER_PROFILE_ROLES = new Set([
@@ -218,7 +226,7 @@ export const ROLES = [
   {
     id: 'ceo_admin',
     title: 'CEO / Admin',
-    description: 'CEO / Admin profile login',
+    description: 'CEO, Admin & Super Admin login',
     icon: 'briefcase',
     bgColor: '#7C5CBF',
   },

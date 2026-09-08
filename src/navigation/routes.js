@@ -26,4 +26,6 @@ export const MAIN_ROUTES = {
   PAYROLL_ADMIN: 'PayrollAdmin',
   MEETINGS: 'Meetings',
   PERFORMANCE: 'Performance',
+  AI_COPILOT: 'AiCopilot',
+  MY_PAYROLL: 'MyPayroll',
 };

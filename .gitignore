@@ -73,3 +73,8 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Real OpenAI key — GitHub push protection blocks this file.
+# Copy src/config/openaiConfig.example.js to src/config/openaiConfig.js
+# and paste your key there.
+src/config/openaiConfig.js

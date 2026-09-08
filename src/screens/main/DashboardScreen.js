@@ -61,6 +61,7 @@ import { style, spacings } from '../../constants/Fonts';
 import { MAIN_ROUTES } from '../../navigation/routes';
 import { getSupabase, isSupabaseConfigured, syncSupabaseRealtimeAuth } from '../../lib/supabase';
 import { isCeoAdminUser, isReviewerUser, isTeamLeaderUser } from '../../constants/roles';
+import { canUseClockTracking } from '../../config/clockTrackingConfig';
 import { fetchAllEmployeeProfiles } from '../../services/employeeService';
 import {
   fetchAllProjects,
@@ -801,6 +802,10 @@ const DashboardScreen = () => {
     };
   }, [isTeamLeader, loadTodayTasks, user?.id]);
 
+  // Clock In / Break / End Day is currently open only to the allow-listed
+  // user (src/config/clockTrackingConfig.js). Nobody else sees the card.
+  const showClockCard = canUseClockTracking(user);
+
   const clockStatusText = isClockedIn
     ? CLOCKED_IN_TEXT
     : isPaused
@@ -945,39 +950,40 @@ const DashboardScreen = () => {
             </View>
           )}
 
-          {/* <View style={styles.clockCard}>
-            <View style={styles.clockLeft}>
-              <Text style={styles.timer}>{formattedTime}</Text>
-              <Text style={styles.clockStatus}>
-                {OFFICE_LABEL} · {clockStatusText}
-              </Text>
-              {isPaused && lastStopReason ? (
-                <Text style={styles.pauseReason}>{lastStopReason}</Text>
-              ) : null}
-
-            </View>
-            <TouchableOpacity
-              style={[
-                styles.clockInButton,
-                isClockedIn && styles.clockOutButton,
-                isCheckingLocation && styles.clockButtonDisabled,
-              ]}
-              activeOpacity={0.8}
-              disabled={isCheckingLocation && !isClockedIn}
-              onPress={handlePrimaryAction}>
-              {isCheckingLocation && !isClockedIn ? (
-                <ActivityIndicator size="small" color={darkAccentGreenColor} />
-              ) : (
-                <Text
-                  style={[
-                    styles.clockInText,
-                    isClockedIn && styles.clockOutText,
-                  ]}>
-                  {clockButtonText}
+          {showClockCard ? (
+            <View style={styles.clockCard}>
+              <View style={styles.clockLeft}>
+                <Text style={styles.timer}>{formattedTime}</Text>
+                <Text style={styles.clockStatus}>
+                  {OFFICE_LABEL} · {clockStatusText}
                 </Text>
-              )}
-            </TouchableOpacity>
-          </View> */}
+                {isPaused && lastStopReason ? (
+                  <Text style={styles.pauseReason}>{lastStopReason}</Text>
+                ) : null}
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.clockInButton,
+                  isClockedIn && styles.clockOutButton,
+                  isCheckingLocation && styles.clockButtonDisabled,
+                ]}
+                activeOpacity={0.8}
+                disabled={isCheckingLocation && !isClockedIn}
+                onPress={handlePrimaryAction}>
+                {isCheckingLocation && !isClockedIn ? (
+                  <ActivityIndicator size="small" color={darkAccentGreenColor} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.clockInText,
+                      isClockedIn && styles.clockOutText,
+                    ]}>
+                    {clockButtonText}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           {isCheckingLocation ? (
             <Text style={styles.locationHint}>{CHECKING_LOCATION_TEXT}</Text>

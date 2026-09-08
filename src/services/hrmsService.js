@@ -1,6 +1,10 @@
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { getLocalDateKey } from './clockSessionsService';
 import { isCeoAdminUser } from '../constants/roles';
+import {
+  fetchAllEmployeeSalaries,
+  fetchEmployeeSalary,
+} from './employeeSalaryService';
 
 const CLOCK_SESSIONS_TABLE = 'clock_sessions';
 const CLOCK_SESSION_SEGMENTS_TABLE = 'clock_session_segments';
@@ -73,6 +77,10 @@ export const getMonthDatesList = (monthKey) => {
 };
 
 // Shift configuration:
+// Paid leaves granted per calendar quarter — same value as the admin app's
+// PAID_LEAVE_QUOTA_PER_QUARTER. Change the policy here only.
+export const PAID_LEAVE_QUOTA_PER_QUARTER = 3;
+
 export const SHIFT_FULL_DAY_HOURS = 8.0;    // Net working hours required for full day
 export const SHIFT_SHORT_LEAVE_HOURS = 6.0; // Short Leave threshold (worked ≥ 6h but < 8h)
 export const SHIFT_HALF_DAY_HOURS = 4.5;    // Half Day threshold (worked ≥ 4.5h but < 6h)
@@ -145,31 +153,24 @@ export const fetchHrmsMonthlyData = async (monthKey) => {
     const startOfMonth = `${monthKey}-01T00:00:00.000Z`;
     const endOfMonth = `${monthKey}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
 
-    // 1. Fetch all employees (resilient to missing salary column)
-    let employees = [];
-    const { data: empsWithSalary, error: empError } = await supabase
-      .from(EMPLOYEE_PROFILES_TABLE)
-      .select('id, name, role, dept, salary')
-      .order('name');
-
-    if (empError) {
-      console.warn('Failed to fetch salary column, fetching without it:', empError.message);
-      const { data: empsNoSalary, error: fallbackError } = await supabase
+    // 1. Fetch all employees. Salary is NOT on employee_profiles — that column
+    // does not exist in the database. It lives in the Finance/Invoicing
+    // project's `employee_salaries` table, same as the admin web app, so we
+    // pull the two in parallel and merge.
+    const [profileResult, salaryMap] = await Promise.all([
+      supabase
         .from(EMPLOYEE_PROFILES_TABLE)
         .select('id, name, role, dept')
-        .order('name');
+        .order('name'),
+      fetchAllEmployeeSalaries().catch(() => ({})),
+    ]);
 
-      if (fallbackError) throw fallbackError;
-      employees = (empsNoSalary || []).map(emp => ({
-        ...emp,
-        base_salary: 0, // Fallback to 0 so we see warning
-      }));
-    } else {
-      employees = (empsWithSalary || []).map(emp => ({
-        ...emp,
-        base_salary: emp.salary || 0,
-      }));
-    }
+    if (profileResult.error) throw profileResult.error;
+
+    let employees = (profileResult.data || []).map(emp => ({
+      ...emp,
+      base_salary: salaryMap[emp.id] || 0,
+    }));
 
     employees = filterHrmsAttendanceEmployees(employees);
 
@@ -445,7 +446,7 @@ const processHrmsAggregation = (monthKey, employees, clockSessions, approvedLeav
       let status = dayWise[dateKey].status;
       
       if (status === 'Leave') {
-        if (currentQuarterLeaves < 3) {
+        if (currentQuarterLeaves < PAID_LEAVE_QUOTA_PER_QUARTER) {
           currentQuarterLeaves++;
           status = 'Paid Leave';
         } else {
@@ -481,6 +482,16 @@ const processHrmsAggregation = (monthKey, employees, clockSessions, approvedLeav
         weeklyOff: weeklyOffCount,
         sandwichLeave: sandwichLeaveCount,
         payableDays,
+        // Quarter leave quota — used by the My Payroll screen to show
+        // "X left this quarter". The existing fields above are unchanged;
+        // these are purely additive, so the Payroll Dashboard and HRMS Admin
+        // screens are unaffected.
+        quarterLeaveQuota: PAID_LEAVE_QUOTA_PER_QUARTER,
+        quarterLeavesUsed: currentQuarterLeaves,
+        quarterLeavesLeft: Math.max(
+          0,
+          PAID_LEAVE_QUOTA_PER_QUARTER - currentQuarterLeaves,
+        ),
       },
     };
   });
@@ -630,33 +641,24 @@ export const fetchEmployeeHrmsData = async (employeeId, monthKey) => {
     const startOfMonth = `${monthKey}-01T00:00:00.000Z`;
     const endOfMonth = `${monthKey}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
 
-    // Fetch employee profile (resilient to missing salary column)
-    let profile = null;
-    const { data: profileWithSalary, error: profileError } = await supabase
-      .from(EMPLOYEE_PROFILES_TABLE)
-      .select('id, name, role, dept, salary')
-      .eq('id', employeeId)
-      .single();
-
-    if (profileError) {
-      console.warn('Failed to fetch salary column for profile, fetching without it:', profileError.message);
-      const { data: profileNoSalary, error: fallbackProfileError } = await supabase
+    // Fetch the profile and this employee's salary in parallel. Salary comes
+    // from the Finance/Invoicing project (`employee_salaries`), not from
+    // employee_profiles — that column does not exist.
+    const [profileResult, salaryAmount] = await Promise.all([
+      supabase
         .from(EMPLOYEE_PROFILES_TABLE)
         .select('id, name, role, dept')
         .eq('id', employeeId)
-        .single();
+        .single(),
+      fetchEmployeeSalary(employeeId).catch(() => null),
+    ]);
 
-      if (fallbackProfileError) throw fallbackProfileError;
-      profile = {
-        ...profileNoSalary,
-        base_salary: 0,
-      };
-    } else {
-      profile = {
-        ...profileWithSalary,
-        base_salary: profileWithSalary?.salary || 0,
-      };
-    }
+    if (profileResult.error) throw profileResult.error;
+
+    const profile = {
+      ...profileResult.data,
+      base_salary: salaryAmount || 0,
+    };
 
     // Fetch clock sessions (with id and clock_out for segment computation)
     const { data: clockSessions, error: clockError } = await supabase

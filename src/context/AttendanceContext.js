@@ -17,12 +17,16 @@ import {
   LOCATION_PERMISSION_REQUIRED,
 } from '../constants/Constants';
 import {
+  GEOFENCE_ENABLED,
   GEOFENCE_RADIUS_METERS,
   LOCATION_CHECK_INTERVAL_MS,
 } from '../config/officeLocation';
 import { geocodeOfficeAddress } from '../services/geocodingService';
 import { useAuth } from './AuthContext';
-import { saveDailyClockSession } from '../services/clockSessionsService';
+import {
+  startClockSession,
+  stopClockSession,
+} from '../services/clockSessionsService';
 import {
   clearLocationWatch,
   getCurrentPosition,
@@ -87,32 +91,36 @@ export const AttendanceProvider = ({ children }) => {
     await AsyncStorage.removeItem(ATTENDANCE_SESSION_KEY);
   }, []);
 
-  const persistClockSession = useCallback(
-    async (totalSeconds, { mode = 'set' } = {}) => {
-      if (!user?.id || totalSeconds <= 0) {
+  // Hours are computed in the database from `session_start` (same as admin),
+  // so all we do from here is open or close the session — there is no need to
+  // send a second count.
+  const openDbClockSession = useCallback(async () => {
+    if (!user?.id) {
+      return;
+    }
+    try {
+      await startClockSession({
+        employeeId: user.id,
+        employeeName: user.name || 'Employee',
+      });
+    } catch (error) {
+      console.warn('Failed to start clock session:', error?.message);
+    }
+  }, [user?.id, user?.name]);
+
+  const closeDbClockSession = useCallback(
+    async (reasonId = 'end_day') => {
+      if (!user?.id) {
         return;
       }
-
-      let secondsToSave = totalSeconds;
-
-      if (mode === 'add') {
-        secondsToSave = totalSeconds - lastPersistedSecondsRef.current;
-        if (secondsToSave <= 0) {
-          return;
-        }
-      }
-
       try {
-        await saveDailyClockSession({
+        await stopClockSession({
           employeeId: user.id,
           employeeName: user.name || 'Employee',
-          hoursToSave: secondsToSave,
-          segmentClockIn: clockInTimestampRef.current,
-          mergeMode: mode,
+          reasonId,
         });
-        lastPersistedSecondsRef.current = totalSeconds;
       } catch (error) {
-        console.warn('Failed to save clock session:', error?.message);
+        console.warn('Failed to stop clock session:', error?.message);
       }
     },
     [user?.id, user?.name],
@@ -194,8 +202,7 @@ export const AttendanceProvider = ({ children }) => {
 
   const endDaySession = useCallback(
     async reason => {
-      const total = getTotalElapsed();
-      await persistClockSession(total, { mode: 'add' });
+      await closeDbClockSession('end_day');
 
       stopLocationWatch();
       clearTimerInterval();
@@ -205,8 +212,7 @@ export const AttendanceProvider = ({ children }) => {
     },
     [
       clearTimerInterval,
-      getTotalElapsed,
-      persistClockSession,
+      closeDbClockSession,
       persistSession,
       resetDayTracking,
       stopLocationWatch,
@@ -215,8 +221,7 @@ export const AttendanceProvider = ({ children }) => {
 
   const autoEndSession = useCallback(
     async (reason, { showAlert = true, alertTitle, alertMessage } = {}) => {
-      const total = getTotalElapsed();
-      await persistClockSession(total, { mode: 'add' });
+      await closeDbClockSession('end_day');
 
       stopLocationWatch();
       clearTimerInterval();
@@ -233,8 +238,7 @@ export const AttendanceProvider = ({ children }) => {
     },
     [
       clearTimerInterval,
-      getTotalElapsed,
-      persistClockSession,
+      closeDbClockSession,
       persistSession,
       resetDayTracking,
       stopLocationWatch,
@@ -242,10 +246,13 @@ export const AttendanceProvider = ({ children }) => {
   );
 
   const pauseSession = useCallback(
-    async (reason, { showAlert = false, alertTitle, alertMessage } = {}) => {
+    async (
+      reason,
+      { reasonId = 'personal', showAlert = false, alertTitle, alertMessage } = {},
+    ) => {
       const total = getTotalElapsed();
 
-      await persistClockSession(total, { mode: 'set' });
+      await closeDbClockSession(reasonId);
 
       stopLocationWatch();
       clearTimerInterval();
@@ -261,6 +268,7 @@ export const AttendanceProvider = ({ children }) => {
         accumulatedSeconds: total,
         lastPersistedSeconds: lastPersistedSecondsRef.current,
         lastStopReason: reason,
+        lastStopReasonId: reasonId,
         sessionDate: getTodayKey(),
         pausedAt: Date.now(),
       });
@@ -272,7 +280,7 @@ export const AttendanceProvider = ({ children }) => {
         );
       }
     },
-    [clearTimerInterval, getTotalElapsed, persistClockSession, persistSession, stopLocationWatch, syncRefs],
+    [clearTimerInterval, closeDbClockSession, getTotalElapsed, persistSession, stopLocationWatch, syncRefs],
   );
 
   const forceStopTimer = useCallback(
@@ -299,6 +307,11 @@ export const AttendanceProvider = ({ children }) => {
   }, []);
 
   const verifyUserAtOffice = useCallback(async () => {
+    // With the geofence off we neither ask for permission nor read location.
+    if (!GEOFENCE_ENABLED) {
+      return { ok: true };
+    }
+
     const hasPermission = await requestLocationPermission();
     if (!hasPermission) {
       showPermissionAlert();
@@ -323,7 +336,7 @@ export const AttendanceProvider = ({ children }) => {
 
   const handleGeofenceCheck = useCallback(
     async currentLocation => {
-      if (!officeCoordsRef.current || !isClockedIn) {
+      if (!GEOFENCE_ENABLED || !officeCoordsRef.current || !isClockedIn) {
         return;
       }
 
@@ -346,6 +359,12 @@ export const AttendanceProvider = ({ children }) => {
 
   const startLocationWatch = useCallback(async () => {
     stopLocationWatch();
+
+    // Geofence off — no location watch, which also means the timer will not
+    // auto-stop when the user leaves the office.
+    if (!GEOFENCE_ENABLED) {
+      return;
+    }
 
     const hasPermission = await requestLocationPermission();
     if (!hasPermission) {
@@ -404,8 +423,10 @@ export const AttendanceProvider = ({ children }) => {
         accumulatedSeconds: baseSeconds,
         sessionDate: getTodayKey(),
       });
+
+      await openDbClockSession();
     },
-    [persistSession, syncRefs],
+    [openDbClockSession, persistSession, syncRefs],
   );
 
   const handleClockIn = useCallback(async () => {
@@ -449,19 +470,21 @@ export const AttendanceProvider = ({ children }) => {
   }, [isClockedIn]);
 
   const confirmClockOut = useCallback(
-    async ({ reason, endDay }) => {
+    async ({ reason, reasonId, endDay }) => {
       if (!reason?.trim()) {
         return;
       }
 
       setShowReasonModal(false);
 
-      if (endDay) {
+      if (endDay || reasonId === 'end_day') {
         await endDaySession(reason.trim());
         return;
       }
 
-      await pauseSession(reason.trim());
+      // reasonId decides which break segment is written to the database
+      // (lunch / tea / personal -> break, meeting -> meeting).
+      await pauseSession(reason.trim(), { reasonId: reasonId || 'personal' });
     },
     [endDaySession, pauseSession],
   );
@@ -504,6 +527,12 @@ export const AttendanceProvider = ({ children }) => {
 
   useEffect(() => {
     if (!isClockedIn) {
+      stopLocationWatch();
+      return;
+    }
+
+    // With the geofence off there is no need to geocode the office either.
+    if (!GEOFENCE_ENABLED) {
       stopLocationWatch();
       return;
     }

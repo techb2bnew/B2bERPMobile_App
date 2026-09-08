@@ -471,3 +471,79 @@ export const MEETING_FILTER_APPLY = 'Apply Filters';
 
 export const MEETING_ORGANIZER_LABEL = 'Organizer';
 export const MEETING_AGENDA_EMPTY = 'No agenda added.';
+
+export const COPILOT_TITLE = 'AI Copilot';
+export const COPILOT_LABEL = 'AI Copilot';
+export const COPILOT_STATUS_LIVE = 'Live · Connected to your company data';
+export const COPILOT_GREETING =
+  "Good day. I'm your B2B AI Copilot — trained on your company data, team performance, pipeline, and operations.\n\nI can analyse your business in real-time, flag risks, and help you make faster decisions. What would you like to know?";
+export const COPILOT_QUICK_COMMANDS_TITLE = 'Quick commands';
+export const COPILOT_INSIGHTS_TITLE = 'WHAT I CAN DO';
+export const COPILOT_THINKING = 'Analysing company data...';
+export const COPILOT_EMPTY_INPUT_PLACEHOLDER =
+  'Ask anything — team, attendance, revenue, risks...';
+export const COPILOT_DISCLAIMER =
+  'B2B AI Copilot · Answers come from your live Supabase records';
+
+export const COPILOT_QUICK_COMMANDS = [
+  {
+    label: 'Summarise today',
+    prompt:
+      "Give me a complete summary of today's operations, attendance, and any risks.",
+  },
+  {
+    label: "Who's absent today?",
+    prompt: 'Who is absent or on leave today, and who has not clocked in yet?',
+  },
+  {
+    label: "Who's underperforming?",
+    prompt: 'Who is underperforming this week and why? What should I do?',
+  },
+  {
+    label: 'Task status',
+    prompt: 'Which project tasks are overdue or at risk right now?',
+  },
+  {
+    label: 'Hiring needs',
+    prompt:
+      'Analyse workload and open vacancies, then tell me which roles I should hire for urgently.',
+  },
+  {
+    label: 'Risk report',
+    prompt: 'List all active risks across projects, clients, and team right now.',
+  },
+];
+
+export const COPILOT_CAPABILITIES = [
+  { icon: 'bar-chart-2', label: 'Analyse revenue & pipeline' },
+  { icon: 'users', label: 'Monitor team performance' },
+  { icon: 'alert-triangle', label: 'Flag risks proactively' },
+  { icon: 'target', label: 'Attendance & shift insights' },
+  { icon: 'clipboard', label: 'Task & project status' },
+  { icon: 'trending-up', label: 'Forecast growth trends' },
+];
+
+export const MY_PAYROLL_TITLE = 'My Payroll';
+export const MY_PAYROLL_LABEL = 'My Payroll';
+export const MY_PAYROLL_SUBTITLE = 'Your own pay — visible only to you';
+
+export const PIN_GATE_LOCKED_TITLE = 'My Payroll is locked';
+export const PIN_GATE_LOCKED_SUBTITLE = 'Enter your Payroll PIN to continue.';
+export const PIN_GATE_SET_TITLE = 'Set a Payroll PIN';
+export const PIN_GATE_SET_NEW_TITLE = 'Set a new PIN';
+export const PIN_GATE_SET_SUBTITLE =
+  'This PIN protects only your own pay details — nobody else can see or reset it but you.';
+export const PIN_GATE_FORGOT_TITLE = 'Confirm your account password';
+export const PIN_GATE_FORGOT_SUBTITLE =
+  'Enter your regular ERP login password to reset your Payroll PIN.';
+export const PIN_GATE_FORGOT_LINK = 'Forgot PIN?';
+export const PIN_GATE_UNLOCK = 'Unlock';
+export const PIN_GATE_SAVE = 'Save PIN';
+export const PIN_GATE_VERIFY = 'Verify';
+export const PIN_GATE_BACK = 'Back';
+
+export const PIN_ERR_TOO_SHORT = 'PIN must be at least 4 characters.';
+export const PIN_ERR_MISMATCH = 'PINs do not match.';
+export const PIN_ERR_WRONG = 'Incorrect PIN.';
+export const PIN_ERR_SAVE_FAILED = 'Could not save your PIN. Please try again.';
+export const PIN_ERR_WRONG_PASSWORD = 'Incorrect account password.';
