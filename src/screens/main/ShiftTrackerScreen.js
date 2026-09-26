@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRoute } from '@react-navigation/native';
+import { useRoute, useFocusEffect } from '@react-navigation/native';
 import {
   ActivityIndicator,
   FlatList,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -236,9 +237,43 @@ const buildTaskDatesLine = task => {
   return parts.join('   ·   ');
 };
 
+const PROJECT_TASKS_PAGE_SIZE = 1000;
+
+const fetchAllProjectTasks = async () => {
+  const supabase = getSupabase();
+  let allRows = [];
+  let from = 0;
+
+  while (true) {
+    const to = from + PROJECT_TASKS_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from('project_tasks')
+      .select('*')
+      .range(from, to);
+
+    if (error) throw error;
+
+    allRows = allRows.concat(data || []);
+
+    if (!data || data.length < PROJECT_TASKS_PAGE_SIZE) {
+      break;
+    }
+    from += PROJECT_TASKS_PAGE_SIZE;
+  }
+
+  return allRows;
+};
+
 const isTaskInProgressStatus = status => {
   const normalized = String(status || '').toLowerCase();
   return normalized === 'in-progress' || normalized === 'doing';
+};
+
+const isTaskScheduledForToday = task => {
+  const todayKey = getLocalDateKey(new Date());
+  const taskDateKey = normalizeTaskDateKey(task?.task_date ?? task?.taskDate);
+  const dueDateKey = normalizeTaskDateKey(task?.due ?? task?.dueDate);
+  return taskDateKey === todayKey || dueDateKey === todayKey;
 };
 
 const isWorkingDayDate = date => {
@@ -430,6 +465,7 @@ const ShiftTrackerScreen = () => {
   const [selectedDepartment, setSelectedDepartment] = useState(null);
   const [rawTasks, setRawTasks] = useState([]);
   const [rawHistory, setRawHistory] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1203,10 +1239,8 @@ const ShiftTrackerScreen = () => {
             projectNameById[p.id] = p.name;
           });
 
-          // 5. Fetch all tasks
-          const { data: rawTasks } = await getSupabase()
-            .from('project_tasks')
-            .select('*');
+          // 5. Fetch all tasks (paginated — table can exceed the 1000-row default cap)
+          const rawTasks = await fetchAllProjectTasks();
 
           if (rawTasks && rawTasks.length > 0) {
             const taskIds = rawTasks.map(t => t.id);
@@ -1479,11 +1513,38 @@ const ShiftTrackerScreen = () => {
       )
       .subscribe();
 
+    // Subscribe to task status/assignment changes so active-task cards refresh live
+    const taskChannelName = createRealtimeChannelName('project-tasks-tracker');
+    const taskChannel = supabase
+      .channel(taskChannelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'project_tasks' },
+        () => loadTrackerData(true)
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(sessionChannel);
       supabase.removeChannel(segmentChannel);
+      supabase.removeChannel(taskChannel);
     };
   }, [loadTrackerData, selectedDate]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadTrackerData(true);
+    }, [loadTrackerData])
+  );
+
+  const handlePullToRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadTrackerData(true);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadTrackerData]);
 
   // Aggregate Stats
   const summaryStats = useMemo(() => {
@@ -1556,7 +1617,8 @@ const ShiftTrackerScreen = () => {
 
   const renderEmployeeRow = ({ item: session }) => {
     const tasks = allTasksByEmployee[session.employee_id] || [];
-    const activeTask = tasks.find(t => t.status === 'in-progress' || t.status === 'doing');
+    const activeTask = tasks.find(t => isTaskInProgressStatus(t.status))
+      || tasks.find(t => isTaskScheduledForToday(t) && String(t.status || '').toLowerCase() !== 'done');
 
     // Calculate current activity text and colors matching web view
     let statusDotColor = '#8B949E'; // Gray (Offline)
@@ -1726,12 +1788,19 @@ const ShiftTrackerScreen = () => {
             <>
               {activeTask ? (
                 <View style={styles.cardActiveTaskFooter}>
-                  <View style={styles.activeTaskIndicatorGroup}>
-                    <View style={styles.pulseDot} />
-                    <Text style={styles.activeTaskPrefix}>Active: </Text>
-                    <Text style={styles.activeTaskTitle} numberOfLines={1}>
-                      {activeTask.title}
-                    </Text>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.activeTaskIndicatorGroup}>
+                      <View style={styles.pulseDot} />
+                      <Text style={styles.activeTaskPrefix}>Active: </Text>
+                      <Text style={styles.activeTaskTitle} numberOfLines={1}>
+                        {activeTask.title}
+                      </Text>
+                    </View>
+                    {buildTaskDatesLine(activeTask) ? (
+                      <Text style={styles.taskDatesLine} numberOfLines={1}>
+                        {buildTaskDatesLine(activeTask)}
+                      </Text>
+                    ) : null}
                   </View>
                   <Text style={styles.activeTaskTime}>
                     {formatSecsToMinHr(activeTask.progressSecs)}
@@ -1970,6 +2039,14 @@ const ShiftTrackerScreen = () => {
                 keyExtractor={(item) => item.id}
                 contentContainerStyle={styles.listContainer}
                 showsVerticalScrollIndicator={false}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={handlePullToRefresh}
+                    tintColor={PURPLE}
+                    colors={[PURPLE]}
+                  />
+                }
               />
             )}
           </View>
